@@ -1,41 +1,87 @@
 {
-  description = "SPI Master - Verilog simulation environment";
+  description = "Chisel Nix";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    flake-parts = {
+      url = "github:hercules-ci/flake-parts";
+      inputs.nixpkgs-lib.follows = "nixpkgs";
+    };
+    treefmt-nix = {
+      url = "github:numtide/treefmt-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    zaozi.url = "github:sequencer/zaozi";
+    mill-ivy-fetcher.url = "github:Avimitin/mill-ivy-fetcher";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
-        pkgs = import nixpkgs { inherit system; };
-      in
-      {
-        devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            iverilog   # Icarus Verilog (iverilog, vvp)
-            verilator  # Verilator (verilator)
-            python3    # Verilator 构建依赖
-            clang-tools
-            gcc
-            bear
-            gtkwave    # 波形查看器
-            gnumake    # make
-          ];
+  outputs =
+    inputs@{
+      self,
+      nixpkgs,
+      flake-parts,
+      ...
+    }:
+    let
+      overlay = import ./nix/overlay.nix;
+    in
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "aarch64-darwin"
+      ];
 
-          shellHook = ''
-            echo "🔧 SPI Master 仿真环境已就绪"
-            echo "   iverilog $(iverilog -V 2>&1 | head -1)"
-            echo ""
-            echo "   make sim_master    - 仿真 SPI_Master (nandland, iverilog)"
-            echo "   make sim_cs        - 仿真 SPI_Master_With_Single_CS (nandland, iverilog)"
-            echo "   make sim_opencores - 仿真 OpenCores SPI Master (verilator)"
-            echo "   make wave_master   - 打开波形 (SPI_Master)"
-            echo "   make wave_cs       - 打开波形 (SPI_Master_With_Single_CS)"
-            echo "   make wave_opencores- 打开波形 (OpenCores SPI)"
-            echo "   make clean         - 清理构建产物"
-          '';
+      imports = [
+        inputs.treefmt-nix.flakeModule
+      ];
+
+      flake.overlays.default = overlay;
+
+      perSystem =
+        { system, pkgs, ... }:
+        {
+          _module.args.pkgs = import nixpkgs {
+            inherit system;
+            # TODO: Do not depend on overlay of zaozi in favor of importing its outputs explicitly to avoid namespace pollution.
+            overlays = with inputs; [
+              zaozi.overlays.default
+              mill-ivy-fetcher.overlays.default
+              overlay
+            ];
+          };
+
+          legacyPackages = pkgs;
+
+          treefmt = {
+            projectRootFile = "flake.nix";
+            programs.scalafmt = {
+              enable = true;
+              includes = [ "*.mill" ];
+            };
+            programs.nixfmt = {
+              enable = true;
+              excludes = [ "*/generated.nix" ];
+            };
+            programs.rustfmt.enable = true;
+          };
+
+          devShells.default =
+            with pkgs;
+            mkShell (
+              {
+                inputsFrom = [ gcd.gcd-compiled ];
+                packages = [
+                  cargo
+                  rust-analyzer
+                  nixd
+                  nvfetcher
+                ];
+                RUST_SRC_PATH = "${rust.packages.stable.rustPlatform.rustLibSrc}";
+              }
+              // gcd.tb-dpi-lib.env
+              // gcd.gcd-compiled.env
+            );
         };
-      });
+    };
 }

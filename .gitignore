@@ -1,9 +1,19 @@
-# Build outputs
-build/
-.direnv
-.cache
-compile_commands.json
+.bloop
+.bsp
+.jvm-opts
+.mill-jvm-opts
+.metals/
+.vscode/
+.envrc
+.direnv/
 
-# Nix
-result
+out/
+result*
+gcd-sim-result/
+/dependencies/
+target/
 
+*.vcd
+*.fst
+*.fsdb
+*.log

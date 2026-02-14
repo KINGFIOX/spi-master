@@ -1,0 +1,44 @@
+{
+    "chisel": {
+        "cargoLocks": null,
+        "date": "2025-04-22",
+        "extract": null,
+        "name": "chisel",
+        "passthru": null,
+        "pinned": false,
+        "src": {
+            "deepClone": false,
+            "fetchSubmodules": false,
+            "leaveDotGit": false,
+            "name": null,
+            "owner": "chipsalliance",
+            "repo": "chisel",
+            "rev": "41db7047e78705f834c38a41609399927f46f565",
+            "sha256": "sha256-sXrQAYU6oBq+yvoXbxwkso6xdnYAkkbae+qMmS98nes=",
+            "sparseCheckout": [],
+            "type": "github"
+        },
+        "version": "41db7047e78705f834c38a41609399927f46f565"
+    },
+    "zaozi": {
+        "cargoLocks": null,
+        "date": "2025-04-14",
+        "extract": null,
+        "name": "zaozi",
+        "passthru": null,
+        "pinned": false,
+        "src": {
+            "deepClone": false,
+            "fetchSubmodules": false,
+            "leaveDotGit": false,
+            "name": null,
+            "owner": "sequencer",
+            "repo": "zaozi",
+            "rev": "5770967e3301547c547ed2b7bbc7c181f95524bf",
+            "sha256": "sha256-U9wZ3sBJbsdjwfunz7rN3YPDKefvRrkdrKGuAXs6WjQ=",
+            "sparseCheckout": [],
+            "type": "github"
+        },
+        "version": "5770967e3301547c547ed2b7bbc7c181f95524bf"
+    }
+}
