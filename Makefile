@@ -90,10 +90,10 @@ wave_cs: $(CS_VCD)
 # ═══════════════════════════════════════════════════════
 
 $(OC_EXE): $(OC_SOURCES) $(OC_DIR)/spi_defines.v $(OC_TB_CPP) | $(BUILD_DIR)
-	$(VERILATOR) --cc --exe --build --trace --no-timing \
+	$(VERILATOR) --cc --exe --build --trace \
 		--top-module spi_top \
 		-I$(OC_DIR) --Mdir $(OC_VDIR) \
-		-Wno-WIDTH -Wno-CASEINCOMPLETE -Wno-INITIALDLY \
+		-Wno-WIDTH -Wno-CASEINCOMPLETE \
 		$(OC_SOURCES) $(OC_TB_CPP) \
 		-o Vspi_top
 

@@ -45,8 +45,6 @@ module spi_shift (clk, rst, latch, byte_sel, len, lsb, go,
                   tip, last,
                   p_in, p_out, s_clk, s_in, s_out);
 
-  parameter Tp = 1;
-
   input                          clk;          // system clock
   input                          rst;          // reset
   input                    [3:0] latch;        // latch signal for storing the data in shift register
@@ -92,13 +90,13 @@ module spi_shift (clk, rst, latch, byte_sel, len, lsb, go,
   always @(posedge clk or posedge rst)
   begin
     if(rst)
-      cnt <= #Tp {`SPI_CHAR_LEN_BITS+1{1'b0}};
+      cnt <= {`SPI_CHAR_LEN_BITS+1{1'b0}};
     else
       begin
         if(tip)
-          cnt <= #Tp pos_edge ? (cnt - {{`SPI_CHAR_LEN_BITS{1'b0}}, 1'b1}) : cnt;
+          cnt <= pos_edge ? (cnt - {{`SPI_CHAR_LEN_BITS{1'b0}}, 1'b1}) : cnt;
         else
-          cnt <= #Tp !(|len) ? {1'b1, {`SPI_CHAR_LEN_BITS{1'b0}}} : {1'b0, len};
+          cnt <= !(|len) ? {1'b1, {`SPI_CHAR_LEN_BITS{1'b0}}} : {1'b0, len};
       end
   end
 
@@ -106,20 +104,20 @@ module spi_shift (clk, rst, latch, byte_sel, len, lsb, go,
   always @(posedge clk or posedge rst)
   begin
     if(rst)
-      tip <= #Tp 1'b0;
+      tip <= 1'b0;
   else if(go && ~tip)
-    tip <= #Tp 1'b1;
+    tip <= 1'b1;
   else if(tip && last && pos_edge)
-    tip <= #Tp 1'b0;
+    tip <= 1'b0;
   end
 
   // Sending bits to the line
   always @(posedge clk or posedge rst)
   begin
     if (rst)
-      s_out   <= #Tp 1'b0;
+      s_out   <= 1'b0;
     else
-      s_out <= #Tp (tx_clk || !tip) ? data[tx_bit_pos[`SPI_CHAR_LEN_BITS-1:0]] : s_out;
+      s_out <= (tx_clk || !tip) ? data[tx_bit_pos[`SPI_CHAR_LEN_BITS-1:0]] : s_out;
   end
 
   // Receiving bits from the line
@@ -128,18 +126,18 @@ module spi_shift (clk, rst, latch, byte_sel, len, lsb, go,
   always @(posedge clk or posedge rst)
   begin
     if (rst)
-      data <= #Tp {`SPI_MAX_CHAR{1'b0}};
+      data <= {`SPI_MAX_CHAR{1'b0}};
     else if (!tip && |latch) begin
       for (i = 0; i < 4; i = i + 1) begin
         if (latch[i]) begin
-          if (byte_sel[0]) data[i*32      +: 8] <= #Tp p_in[ 7: 0];
-          if (byte_sel[1]) data[i*32 +  8 +: 8] <= #Tp p_in[15: 8];
-          if (byte_sel[2]) data[i*32 + 16 +: 8] <= #Tp p_in[23:16];
-          if (byte_sel[3]) data[i*32 + 24 +: 8] <= #Tp p_in[31:24];
+          if (byte_sel[0]) data[i*32      +: 8] <= p_in[ 7: 0];
+          if (byte_sel[1]) data[i*32 +  8 +: 8] <= p_in[15: 8];
+          if (byte_sel[2]) data[i*32 + 16 +: 8] <= p_in[23:16];
+          if (byte_sel[3]) data[i*32 + 24 +: 8] <= p_in[31:24];
         end
       end
     end else
-      data[rx_bit_pos[`SPI_CHAR_LEN_BITS-1:0]] <= #Tp rx_clk ? s_in : data[rx_bit_pos[`SPI_CHAR_LEN_BITS-1:0]];
+      data[rx_bit_pos[`SPI_CHAR_LEN_BITS-1:0]] <= rx_clk ? s_in : data[rx_bit_pos[`SPI_CHAR_LEN_BITS-1:0]];
   end
 
 endmodule

@@ -63,8 +63,6 @@ module spi_top (
     input  miso_pad_i
 );
 
-  parameter Tp = 1;
-
   // Internal active-high reset (sub-modules use posedge rst)
   wire rst = ~presetn;
 
@@ -84,7 +82,7 @@ module spi_top (
   wire                          spi_ctrl_sel;
   wire [                   3:0] spi_tx_sel;
   wire                          spi_ss_sel;
-  wire                          tip;
+  wire                          tip; // transfer in progress
   wire                          pos_edge;
   wire                          neg_edge;
   wire                          last_bit;
@@ -123,27 +121,27 @@ module spi_top (
 
   // ─── Interrupt ───────────────────────────────────────────
   always @(posedge pclk or negedge presetn) begin
-    if (!presetn) int_o <= #Tp 1'b0;
-    else if (ie && tip && last_bit && pos_edge) int_o <= #Tp 1'b1;
-    else if (psel && penable) int_o <= #Tp 1'b0;
+    if (!presetn) int_o <= 1'b0;
+    else if (ie && tip && last_bit && pos_edge) int_o <= 1'b1;
+    else if (psel && penable) int_o <= 1'b0; // reset interrupt flag
   end
 
   // ─── Divider register (16-bit, byte-lane write) ──────────
   always @(posedge pclk or negedge presetn) begin
-    if (!presetn) divider <= #Tp {`SPI_DIVIDER_LEN{1'b0}};
+    if (!presetn) divider <= {`SPI_DIVIDER_LEN{1'b0}};
     else if (reg_write && spi_divider_sel && !tip) begin
-      if (pstrb[0]) divider[ 7:0] <= #Tp pwdata[ 7:0];
-      if (pstrb[1]) divider[15:8] <= #Tp pwdata[15:8];
+      if (pstrb[0]) divider[ 7:0] <= pwdata[ 7:0];
+      if (pstrb[1]) divider[15:8] <= pwdata[15:8];
     end
   end
 
   // ─── Ctrl register ──────────────────────────────────────
   always @(posedge pclk or negedge presetn) begin
-    if (!presetn) ctrl <= #Tp {`SPI_CTRL_BIT_NB{1'b0}};
+    if (!presetn) ctrl <= {`SPI_CTRL_BIT_NB{1'b0}};
     else if (reg_write && spi_ctrl_sel && !tip) begin
-      if (pstrb[0]) ctrl[7:0] <= #Tp pwdata[7:0] | {7'b0, ctrl[0]};
-      if (pstrb[1]) ctrl[`SPI_CTRL_BIT_NB-1:8] <= #Tp pwdata[`SPI_CTRL_BIT_NB-1:8];
-    end else if (tip && last_bit && pos_edge) ctrl[`SPI_CTRL_GO] <= #Tp 1'b0;
+      if (pstrb[0]) ctrl[7:0] <= pwdata[7:0] | {7'b0, ctrl[0]};
+      if (pstrb[1]) ctrl[`SPI_CTRL_BIT_NB-1:8] <= pwdata[`SPI_CTRL_BIT_NB-1:8];
+    end else if (tip && last_bit && pos_edge) ctrl[`SPI_CTRL_GO] <= 1'b0;
   end
 
   assign rx_negedge = ctrl[`SPI_CTRL_RX_NEGEDGE];
@@ -156,9 +154,9 @@ module spi_top (
 
   // ─── Slave select register (8-bit) ──────────────────────
   always @(posedge pclk or negedge presetn) begin
-    if (!presetn) ss <= #Tp {`SPI_SS_NB{1'b0}};
+    if (!presetn) ss <= {`SPI_SS_NB{1'b0}};
     else if (reg_write && spi_ss_sel && !tip) begin
-      if (pstrb[0]) ss <= #Tp pwdata[`SPI_SS_NB-1:0];
+      if (pstrb[0]) ss <= pwdata[`SPI_SS_NB-1:0];
     end
   end
 
