@@ -30,5 +30,5 @@ final: prev: {
 
   cds-fhs-env = final.callPackage ./pkgs/cds-fhs-env.nix { inherit getEnv'; };
 
-  gcd = final.callPackage ./gcd { };
+  spi = final.callPackage ./spi { };
 }

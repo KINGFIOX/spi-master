@@ -20,8 +20,8 @@ object deps {
   val chiselPlugin = ivy"org.chipsalliance:chisel-plugin_${scalaVer}:0.0.0+0-no-vcs-SNAPSHOT"
 }
 
-object gcd extends GCD
-trait GCD  extends common.HasChisel with ScalafmtModule {
+object spi extends SPIMaster
+trait SPIMaster extends common.HasChisel with ScalafmtModule {
   def scalaVersion = Task(deps.scalaVer)
 
   def chiselModule    = None
@@ -37,7 +37,7 @@ trait Elaborator  extends common.ElaboratorModule with ScalafmtModule {
   def mlirInstallPath  = Task.Input(os.Path(Task.env.getOrElse("MLIR_INSTALL_PATH", "MLIR_INSTALL_PATH not found")))
   def circtInstallPath = Task.Input(os.Path(Task.env.getOrElse("CIRCT_INSTALL_PATH", "CIRCT_INSTALL_PATH not found")))
 
-  def generators = Seq(gcd)
+  def generators = Seq(spi)
 
   def mainargsIvy = deps.mainargs
 

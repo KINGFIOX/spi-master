@@ -1,5 +1,4 @@
-# SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: 2024 Jiuyang Liu <liu@jiuyang.me>
+# SPDX-License-Identifier: Unlicense
 
 {
   lib,
@@ -26,12 +25,12 @@
 }:
 
 let
-  gcdMillDeps = ivy-gather ../dependencies/locks/gcd-lock.nix;
+  spiMillDeps = ivy-gather ../dependencies/locks/spi-lock.nix;
 
   self = stdenv.mkDerivation rec {
-    name = "gcd";
+    name = "spi";
 
-    mainClass = "org.chipsalliance.gcd.elaborator.${target}Main";
+    mainClass = "org.chipsalliance.spi.elaborator.${target}Main";
 
     src =
       with lib.fileset;
@@ -40,14 +39,14 @@ let
         fileset = unions [
           ./../../build.mill
           ./../../common.mill
-          ./../../gcd
+          ./../../spi
           ./../../elaborator
         ];
       };
 
     buildInputs = with dependencies; [
       ivy-chisel.setupHook
-      gcdMillDeps
+      spiMillDeps
     ];
 
     nativeBuildInputs = with dependencies; [
@@ -63,7 +62,7 @@ let
 
     passthru = {
       bump = writeShellApplication {
-        name = "bump-gcd-mill-lock";
+        name = "bump-spi-mill-lock";
         runtimeInputs = [
           mill
           mill-ivy-fetcher
@@ -72,7 +71,7 @@ let
           ivyLocal="${dependencies.ivyLocalRepo}"
           export JAVA_TOOL_OPTIONS="''${JAVA_TOOL_OPTIONS:-} -Dcoursier.ivy.home=$ivyLocal -Divy.home=$ivyLocal"
 
-          mif run -p "${src}" -o ./nix/dependencies/locks/gcd-lock.nix "$@"
+          mif run -p "${src}" -o ./nix/dependencies/locks/spi-lock.nix "$@"
         '';
       };
       inherit target;

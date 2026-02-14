@@ -70,7 +70,7 @@
             with pkgs;
             mkShell (
               {
-                inputsFrom = [ gcd.gcd-compiled ];
+                inputsFrom = [ spi.spi-compiled ];
                 packages = [
                   cargo
                   rust-analyzer
@@ -79,8 +79,7 @@
                 ];
                 RUST_SRC_PATH = "${rust.packages.stable.rustPlatform.rustLibSrc}";
               }
-              // gcd.tb-dpi-lib.env
-              // gcd.gcd-compiled.env
+              // spi.spi-compiled.env
             );
         };
     };
