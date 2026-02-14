@@ -1,6 +1,8 @@
 # Build outputs
 build/
 .direnv
+.cache
+compile_commands.json
 
 # Nix
 result

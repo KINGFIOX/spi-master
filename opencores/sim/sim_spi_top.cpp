@@ -9,12 +9,16 @@
 //   4. 寄存器读写验证
 //
 // 原理:
-//   通过 Wishbone 总线接口配置 SPI 控制器寄存器，
+//   通过 APB 总线接口配置 SPI 控制器寄存器，
 //   将 MOSI 直连 MISO 实现回环 (loopback) 测试。
 //   使用 TX_NEGEDGE 模式: MOSI 在 SCLK 下降沿变化，
 //   MISO 在上升沿采样，确保回环数据时序正确。
 //
-// 寄存器映射 (wb_adr_i[4:2] 为寄存器偏移):
+// APB 协议:
+//   Setup  phase: PSEL=1, PENABLE=0, 驱动地址/数据/写使能
+//   Access phase: PSEL=1, PENABLE=1, 从设备响应 PREADY/PRDATA
+//
+// 寄存器映射 (paddr[4:2] 为寄存器偏移):
 //   0x00 (offset 0) - TX_0 / RX_0  发送/接收数据 [31:0]
 //   0x04 (offset 1) - TX_1 / RX_1  发送/接收数据 [63:32]
 //   0x08 (offset 2) - TX_2 / RX_2  发送/接收数据 [95:64]
@@ -31,8 +35,7 @@
 #include <cstdlib>
 #include <memory>
 
-// ─── Wishbone 寄存器地址 ────────────────────────────────────
-// wb_adr_i[4:0]，其中 [4:2] 用于寄存器选择
+// ─── 寄存器地址 (字节地址, paddr[4:2] 选寄存器) ───────────────
 static constexpr uint8_t ADDR_TX0    = 0 << 2;  // 0x00
 static constexpr uint8_t ADDR_TX1    = 1 << 2;  // 0x04
 static constexpr uint8_t ADDR_CTRL   = 4 << 2;  // 0x10
@@ -66,70 +69,78 @@ static int            test_fail = 0;
 // 同时将 MOSI 回环到 MISO
 static void tick() {
     // 下降沿
-    dut->wb_clk_i = 0;
+    dut->pclk = 0;
     dut->miso_pad_i = dut->mosi_pad_o;  // 回环连接
     dut->eval();
     if (tfp) tfp->dump(sim_time++);
 
     // 上升沿
-    dut->wb_clk_i = 1;
+    dut->pclk = 1;
     dut->miso_pad_i = dut->mosi_pad_o;  // 回环连接
     dut->eval();
     if (tfp) tfp->dump(sim_time++);
 }
 
 // ─── 复位 ───────────────────────────────────────────────────
-// 高电平有效复位，保持 10 个时钟周期
+// presetn 低电平有效复位，保持 10 个时钟周期
 static void reset() {
-    dut->wb_rst_i   = 1;
-    dut->wb_cyc_i   = 0;
-    dut->wb_stb_i   = 0;
-    dut->wb_we_i    = 0;
-    dut->wb_sel_i   = 0;
-    dut->wb_adr_i   = 0;
-    dut->wb_dat_i   = 0;
+    dut->presetn    = 0;   // active-low reset asserted
+    dut->psel       = 0;
+    dut->penable    = 0;
+    dut->pwrite     = 0;
+    dut->pstrb      = 0;
+    dut->paddr      = 0;
+    dut->pwdata     = 0;
     dut->miso_pad_i = 0;
 
     for (int i = 0; i < 10; i++) tick();
 
-    dut->wb_rst_i = 0;
+    dut->presetn = 1;      // release reset
     tick();
 }
 
-// ─── Wishbone 写操作 ────────────────────────────────────────
-// 设置地址、数据、选通信号，等待 ACK 应答
-static void wb_write(uint8_t addr, uint32_t data) {
-    dut->wb_adr_i = addr;
-    dut->wb_dat_i = data;
-    dut->wb_sel_i = 0xF;  // 全字节选通
-    dut->wb_we_i  = 1;
-    dut->wb_stb_i = 1;
-    dut->wb_cyc_i = 1;
-
-    do { tick(); } while (!dut->wb_ack_o);
-
-    dut->wb_stb_i = 0;
-    dut->wb_cyc_i = 0;
-    dut->wb_we_i  = 0;
+// ─── APB 写操作 ──────────────────────────────────────────────
+// Setup phase → Access phase, 共 2 个时钟周期
+static void apb_write(uint8_t addr, uint32_t data) {
+    // Setup phase: PSEL=1, PENABLE=0
+    dut->paddr   = addr;
+    dut->pwdata  = data;
+    dut->pstrb   = 0xF;   // 全字节选通
+    dut->pwrite  = 1;
+    dut->psel    = 1;
+    dut->penable = 0;
     tick();
+
+    // Access phase: PENABLE=1, 写入在此上升沿生效
+    dut->penable = 1;
+    tick();
+
+    // Idle: 释放总线
+    dut->psel    = 0;
+    dut->penable = 0;
+    dut->pwrite  = 0;
 }
 
-// ─── Wishbone 读操作 ────────────────────────────────────────
-// 设置地址，等待 ACK，读取数据总线
-static uint32_t wb_read(uint8_t addr) {
-    dut->wb_adr_i = addr;
-    dut->wb_sel_i = 0xF;
-    dut->wb_we_i  = 0;
-    dut->wb_stb_i = 1;
-    dut->wb_cyc_i = 1;
-
-    do { tick(); } while (!dut->wb_ack_o);
-
-    uint32_t data = dut->wb_dat_o;
-
-    dut->wb_stb_i = 0;
-    dut->wb_cyc_i = 0;
+// ─── APB 读操作 ──────────────────────────────────────────────
+// Setup phase → Access phase, prdata 在 Access phase 有效
+static uint32_t apb_read(uint8_t addr) {
+    // Setup phase: PSEL=1, PENABLE=0
+    dut->paddr   = addr;
+    dut->pwrite  = 0;
+    dut->pstrb   = 0xF;
+    dut->psel    = 1;
+    dut->penable = 0;
     tick();
+
+    // Access phase: PENABLE=1, prdata 为组合逻辑输出
+    dut->penable = 1;
+    tick();
+
+    uint32_t data = dut->prdata;
+
+    // Idle: 释放总线
+    dut->psel    = 0;
+    dut->penable = 0;
 
     return data;
 }
@@ -138,7 +149,7 @@ static uint32_t wb_read(uint8_t addr) {
 // 轮询 CTRL 寄存器，等待 GO 位自动清零（表示传输结束）
 static bool wait_xfer_done(int timeout = 100000) {
     while (timeout-- > 0) {
-        uint32_t ctrl = wb_read(ADDR_CTRL);
+        uint32_t ctrl = apb_read(ADDR_CTRL);
         if (!(ctrl & CTRL_GO)) return true;
     }
     printf("  ERROR: 传输超时!\n");
@@ -164,25 +175,25 @@ static void check(const char* name, uint32_t expected, uint32_t actual,
 static uint32_t spi_transfer(uint32_t tx_data, uint32_t char_len,
                              uint32_t divider) {
     // 1. 设置时钟分频值
-    wb_write(ADDR_DIVIDE, divider);
+    apb_write(ADDR_DIVIDE, divider);
 
     // 2. 选择从设备 0 (SS[0] = 1)
-    wb_write(ADDR_SS, 0x01);
+    apb_write(ADDR_SS, 0x01);
 
     // 3. 写入发送数据
-    wb_write(ADDR_TX0, tx_data);
+    apb_write(ADDR_TX0, tx_data);
 
     // 4. 写入控制寄存器并启动传输
     //    TX_NEGEDGE: MOSI 在 SCLK 下降沿变化，MISO 在上升沿采样
     //    这样回环信号有半个 SCLK 周期的建立时间，数据正确
     uint32_t ctrl = (char_len & 0x7F) | CTRL_GO | CTRL_ASS | CTRL_TX_NEG;
-    wb_write(ADDR_CTRL, ctrl);
+    apb_write(ADDR_CTRL, ctrl);
 
     // 5. 等待传输完成 (GO 位自动清零)
     wait_xfer_done();
 
     // 6. 读回接收数据 (RX_0 与 TX_0 共享地址偏移 0)
-    return wb_read(ADDR_TX0);
+    return apb_read(ADDR_TX0);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -198,7 +209,7 @@ int main(int argc, char** argv) {
     tfp->open("build/opencores_spi.vcd");
 
     printf("════════════════════════════════════════════════════\n");
-    printf("  OpenCores SPI Master - Verilator 仿真测试\n");
+    printf("  OpenCores SPI Master (APB) - Verilator 仿真测试\n");
     printf("════════════════════════════════════════════════════\n\n");
 
     // ─── 复位 ─────────────────────────────────────────
@@ -247,12 +258,12 @@ int main(int argc, char** argv) {
     {
         printf("── 测试 4: 寄存器读写验证 ──\n");
 
-        wb_write(ADDR_DIVIDE, 0x1234);
-        uint32_t div = wb_read(ADDR_DIVIDE);
+        apb_write(ADDR_DIVIDE, 0x1234);
+        uint32_t div = apb_read(ADDR_DIVIDE);
         check("DIVIDER 寄存器", 0x1234, div, 0xFFFF);
 
-        wb_write(ADDR_SS, 0xAB);
-        uint32_t ss = wb_read(ADDR_SS);
+        apb_write(ADDR_SS, 0xAB);
+        uint32_t ss = apb_read(ADDR_SS);
         check("SS 寄存器", 0xAB, ss, 0xFF);
 
         printf("\n");

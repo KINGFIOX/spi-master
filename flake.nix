@@ -19,6 +19,7 @@
             python3    # Verilator 构建依赖
             clang-tools
             gcc
+            bear
             gtkwave    # 波形查看器
             gnumake    # make
           ];

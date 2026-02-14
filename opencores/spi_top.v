@@ -42,135 +42,107 @@
 `include "spi_defines.v"
 
 module spi_top (
-    // Wishbone signals
-    wb_clk_i,
-    wb_rst_i,
-    wb_adr_i,
-    wb_dat_i,
-    wb_dat_o,
-    wb_sel_i,
-    wb_we_i,
-    wb_stb_i,
-    wb_cyc_i,
-    wb_ack_o,
-    wb_err_o,
-    wb_int_o,
+    // APB signals
+    input  wire        pclk,
+    input  wire        presetn,    // active-low reset (AMBA standard)
+    input  wire  [4:0] paddr,
+    input  wire        psel,
+    input  wire        penable,
+    input  wire        pwrite,
+    input  wire  [3:0] pstrb,
+    input  wire [31:0] pwdata,
+    output wire [31:0] prdata,
+    output wire        pready,
+    output wire        pslverr,
+    output reg         int_o,
 
     // SPI signals
-    ss_pad_o,
-    sclk_pad_o,
-    mosi_pad_o,
-    miso_pad_i
+    output [`SPI_SS_NB-1:0] ss_pad_o,
+    output sclk_pad_o,
+    output mosi_pad_o,
+    input  miso_pad_i
 );
 
   parameter Tp = 1;
 
-  // Wishbone signals
-  input wb_clk_i;  // master clock input
-  input wb_rst_i;  // synchronous active high reset
-  input [4:0] wb_adr_i;  // lower address bits
-  input [32-1:0] wb_dat_i;  // databus input
-  output [32-1:0] wb_dat_o;  // databus output
-  input [3:0] wb_sel_i;  // byte select inputs
-  input wb_we_i;  // write enable input
-  input wb_stb_i;  // stobe/core select signal
-  input wb_cyc_i;  // valid bus cycle input
-  output wb_ack_o;  // bus cycle acknowledge output
-  output wb_err_o;  // termination w/ error
-  output wb_int_o;  // interrupt request signal output
-
-  // SPI signals
-  output [`SPI_SS_NB-1:0] ss_pad_o;  // slave select
-  output sclk_pad_o;  // serial clock
-  output mosi_pad_o;  // master out slave in
-  input miso_pad_i;  // master in slave out
-
-  reg  [                32-1:0] wb_dat_o;
-  reg                           wb_ack_o;
-  reg                           wb_int_o;
+  // Internal active-high reset (sub-modules use posedge rst)
+  wire rst = ~presetn;
 
   // Internal signals
   reg  [  `SPI_DIVIDER_LEN-1:0] divider;  // Divider register
-  reg  [  `SPI_CTRL_BIT_NB-1:0] ctrl;  // Control and status register
-  reg  [        `SPI_SS_NB-1:0] ss;  // Slave select register
-  reg  [                32-1:0] wb_dat;  // wb data out
-  wire [     `SPI_MAX_CHAR-1:0] rx;  // Rx register
-  wire                          rx_negedge;  // miso is sampled on negative edge
-  wire                          tx_negedge;  // mosi is driven on negative edge
-  wire [`SPI_CHAR_LEN_BITS-1:0] char_len;  // char len
-  wire                          go;  // go
-  wire                          lsb;  // lsb first on line
-  wire                          ie;  // interrupt enable
-  wire                          ass;  // automatic slave select
-  wire                          spi_divider_sel;  // divider register select
-  wire                          spi_ctrl_sel;  // ctrl register select
-  wire [                   3:0] spi_tx_sel;  // tx_l register select
-  wire                          spi_ss_sel;  // ss register select
-  wire                          tip;  // transfer in progress
-  wire                          pos_edge;  // recognize posedge of sclk
-  wire                          neg_edge;  // recognize negedge of sclk
-  wire                          last_bit;  // marks last character bit
+  reg  [  `SPI_CTRL_BIT_NB-1:0] ctrl;     // Control and status register
+  reg  [        `SPI_SS_NB-1:0] ss;        // Slave select register
+  wire [     `SPI_MAX_CHAR-1:0] rx;        // Rx register
+  wire                          rx_negedge;
+  wire                          tx_negedge;
+  wire [`SPI_CHAR_LEN_BITS-1:0] char_len;
+  wire                          go;
+  wire                          lsb;
+  wire                          ie;
+  wire                          ass;
+  wire                          spi_divider_sel;
+  wire                          spi_ctrl_sel;
+  wire [                   3:0] spi_tx_sel;
+  wire                          spi_ss_sel;
+  wire                          tip;
+  wire                          pos_edge;
+  wire                          neg_edge;
+  wire                          last_bit;
 
-  // Address decoder
-  assign spi_divider_sel = wb_cyc_i & wb_stb_i & (wb_adr_i[`SPI_OFS_BITS] == `SPI_DEVIDE);
-  assign spi_ctrl_sel    = wb_cyc_i & wb_stb_i & (wb_adr_i[`SPI_OFS_BITS] == `SPI_CTRL);
-  assign spi_tx_sel[0]   = wb_cyc_i & wb_stb_i & (wb_adr_i[`SPI_OFS_BITS] == `SPI_TX_0);
-  assign spi_tx_sel[1]   = wb_cyc_i & wb_stb_i & (wb_adr_i[`SPI_OFS_BITS] == `SPI_TX_1);
-  assign spi_tx_sel[2]   = wb_cyc_i & wb_stb_i & (wb_adr_i[`SPI_OFS_BITS] == `SPI_TX_2);
-  assign spi_tx_sel[3]   = wb_cyc_i & wb_stb_i & (wb_adr_i[`SPI_OFS_BITS] == `SPI_TX_3);
-  assign spi_ss_sel      = wb_cyc_i & wb_stb_i & (wb_adr_i[`SPI_OFS_BITS] == `SPI_SS);
+  // ─── APB bus control ─────────────────────────────────────
+  wire reg_write = psel & penable & pwrite;   // write in access phase
 
-  // Read from registers
-  always @(wb_adr_i or rx or ctrl or divider or ss) begin
-    case (wb_adr_i[`SPI_OFS_BITS])
-      `SPI_RX_0:   wb_dat = rx[31:0];
-      `SPI_RX_1:   wb_dat = rx[63:32];
-      `SPI_RX_2:   wb_dat = rx[95:64];
-      `SPI_RX_3:   wb_dat = rx[`SPI_MAX_CHAR-1:96];
-      `SPI_CTRL:   wb_dat = {{32 - `SPI_CTRL_BIT_NB{1'b0}}, ctrl};
-      `SPI_DEVIDE: wb_dat = {{32 - `SPI_DIVIDER_LEN{1'b0}}, divider};
-      `SPI_SS:     wb_dat = {{32 - `SPI_SS_NB{1'b0}}, ss};
-      default:     wb_dat = 32'bx;
+  // No wait states, no errors
+  assign pready  = 1'b1;
+  assign pslverr = 1'b0;
+
+  // ─── Address decoder ─────────────────────────────────────
+  assign spi_divider_sel = psel & (paddr[`SPI_OFS_BITS] == `SPI_DEVIDE);
+  assign spi_ctrl_sel    = psel & (paddr[`SPI_OFS_BITS] == `SPI_CTRL);
+  assign spi_tx_sel[0]   = psel & (paddr[`SPI_OFS_BITS] == `SPI_TX_0);
+  assign spi_tx_sel[1]   = psel & (paddr[`SPI_OFS_BITS] == `SPI_TX_1);
+  assign spi_tx_sel[2]   = psel & (paddr[`SPI_OFS_BITS] == `SPI_TX_2);
+  assign spi_tx_sel[3]   = psel & (paddr[`SPI_OFS_BITS] == `SPI_TX_3);
+  assign spi_ss_sel      = psel & (paddr[`SPI_OFS_BITS] == `SPI_SS);
+
+  // ─── Read from registers (combinational) ─────────────────
+  reg [31:0] prdata_mux;
+  always @(*) begin
+    case (paddr[`SPI_OFS_BITS])
+      `SPI_RX_0:   prdata_mux = rx[31:0];
+      `SPI_RX_1:   prdata_mux = rx[63:32];
+      `SPI_RX_2:   prdata_mux = rx[95:64];
+      `SPI_RX_3:   prdata_mux = rx[`SPI_MAX_CHAR-1:96];
+      `SPI_CTRL:   prdata_mux = {{32 - `SPI_CTRL_BIT_NB{1'b0}}, ctrl};
+      `SPI_DEVIDE: prdata_mux = {{32 - `SPI_DIVIDER_LEN{1'b0}}, divider};
+      `SPI_SS:     prdata_mux = {{32 - `SPI_SS_NB{1'b0}}, ss};
+      default:     prdata_mux = 32'b0;
     endcase
   end
+  assign prdata = prdata_mux;
 
-  // Wb data out
-  always @(posedge wb_clk_i or posedge wb_rst_i) begin
-    if (wb_rst_i) wb_dat_o <= #Tp 32'b0;
-    else wb_dat_o <= #Tp wb_dat;
+  // ─── Interrupt ───────────────────────────────────────────
+  always @(posedge pclk or negedge presetn) begin
+    if (!presetn) int_o <= #Tp 1'b0;
+    else if (ie && tip && last_bit && pos_edge) int_o <= #Tp 1'b1;
+    else if (psel && penable) int_o <= #Tp 1'b0;
   end
 
-  // Wb acknowledge
-  always @(posedge wb_clk_i or posedge wb_rst_i) begin
-    if (wb_rst_i) wb_ack_o <= #Tp 1'b0;
-    else wb_ack_o <= #Tp wb_cyc_i & wb_stb_i & ~wb_ack_o;
-  end
-
-  // Wb error
-  assign wb_err_o = 1'b0;
-
-  // Interrupt
-  always @(posedge wb_clk_i or posedge wb_rst_i) begin
-    if (wb_rst_i) wb_int_o <= #Tp 1'b0;
-    else if (ie && tip && last_bit && pos_edge) wb_int_o <= #Tp 1'b1;
-    else if (wb_ack_o) wb_int_o <= #Tp 1'b0;
-  end
-
-  // Divider register (16-bit, byte-lane write)
-  always @(posedge wb_clk_i or posedge wb_rst_i) begin
-    if (wb_rst_i) divider <= #Tp{`SPI_DIVIDER_LEN{1'b0}};
-    else if (spi_divider_sel && wb_we_i && !tip) begin
-      if (wb_sel_i[0]) divider[ 7:0] <= #Tp wb_dat_i[ 7:0];
-      if (wb_sel_i[1]) divider[15:8] <= #Tp wb_dat_i[15:8];
+  // ─── Divider register (16-bit, byte-lane write) ──────────
+  always @(posedge pclk or negedge presetn) begin
+    if (!presetn) divider <= #Tp {`SPI_DIVIDER_LEN{1'b0}};
+    else if (reg_write && spi_divider_sel && !tip) begin
+      if (pstrb[0]) divider[ 7:0] <= #Tp pwdata[ 7:0];
+      if (pstrb[1]) divider[15:8] <= #Tp pwdata[15:8];
     end
   end
 
-  // Ctrl register
-  always @(posedge wb_clk_i or posedge wb_rst_i) begin
-    if (wb_rst_i) ctrl <= #Tp{`SPI_CTRL_BIT_NB{1'b0}};
-    else if (spi_ctrl_sel && wb_we_i && !tip) begin
-      if (wb_sel_i[0]) ctrl[7:0] <= #Tp wb_dat_i[7:0] | {7'b0, ctrl[0]};
-      if (wb_sel_i[1]) ctrl[`SPI_CTRL_BIT_NB-1:8] <= #Tp wb_dat_i[`SPI_CTRL_BIT_NB-1:8];
+  // ─── Ctrl register ──────────────────────────────────────
+  always @(posedge pclk or negedge presetn) begin
+    if (!presetn) ctrl <= #Tp {`SPI_CTRL_BIT_NB{1'b0}};
+    else if (reg_write && spi_ctrl_sel && !tip) begin
+      if (pstrb[0]) ctrl[7:0] <= #Tp pwdata[7:0] | {7'b0, ctrl[0]};
+      if (pstrb[1]) ctrl[`SPI_CTRL_BIT_NB-1:8] <= #Tp pwdata[`SPI_CTRL_BIT_NB-1:8];
     end else if (tip && last_bit && pos_edge) ctrl[`SPI_CTRL_GO] <= #Tp 1'b0;
   end
 
@@ -182,19 +154,20 @@ module spi_top (
   assign ie         = ctrl[`SPI_CTRL_IE];
   assign ass        = ctrl[`SPI_CTRL_ASS];
 
-  // Slave select register (8-bit)
-  always @(posedge wb_clk_i or posedge wb_rst_i) begin
-    if (wb_rst_i) ss <= #Tp{`SPI_SS_NB{1'b0}};
-    else if (spi_ss_sel && wb_we_i && !tip) begin
-      if (wb_sel_i[0]) ss <= #Tp wb_dat_i[`SPI_SS_NB-1:0];
+  // ─── Slave select register (8-bit) ──────────────────────
+  always @(posedge pclk or negedge presetn) begin
+    if (!presetn) ss <= #Tp {`SPI_SS_NB{1'b0}};
+    else if (reg_write && spi_ss_sel && !tip) begin
+      if (pstrb[0]) ss <= #Tp pwdata[`SPI_SS_NB-1:0];
     end
   end
 
-  assign ss_pad_o = ~((ss &{`SPI_SS_NB{tip & ass}}) | (ss &{`SPI_SS_NB{!ass}}));
+  assign ss_pad_o = ~((ss & {`SPI_SS_NB{tip & ass}}) | (ss & {`SPI_SS_NB{!ass}}));
 
+  // ─── Sub-modules ─────────────────────────────────────────
   spi_clgen clgen (
-      .clk_in(wb_clk_i),
-      .rst(wb_rst_i),
+      .clk_in(pclk),
+      .rst(rst),
       .go(go),
       .enable(tip),
       .last_clk(last_bit),
@@ -205,11 +178,11 @@ module spi_top (
   );
 
   spi_shift shift (
-      .clk(wb_clk_i),
-      .rst(wb_rst_i),
+      .clk(pclk),
+      .rst(rst),
       .len(char_len[`SPI_CHAR_LEN_BITS-1:0]),
-      .latch(spi_tx_sel[3:0] & {4{wb_we_i}}),
-      .byte_sel(wb_sel_i),
+      .latch(spi_tx_sel[3:0] & {4{penable & pwrite}}),
+      .byte_sel(pstrb),
       .lsb(lsb),
       .go(go),
       .pos_edge(pos_edge),
@@ -218,7 +191,7 @@ module spi_top (
       .tx_negedge(tx_negedge),
       .tip(tip),
       .last(last_bit),
-      .p_in(wb_dat_i),
+      .p_in(pwdata),
       .p_out(rx),
       .s_clk(sclk_pad_o),
       .s_in(miso_pad_i),
