@@ -76,6 +76,9 @@
                   rust-analyzer
                   nixd
                   nvfetcher
+                  verilator
+                  python3
+                  clang-tools
                 ];
                 RUST_SRC_PATH = "${rust.packages.stable.rustPlatform.rustLibSrc}";
               }
