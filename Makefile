@@ -14,8 +14,8 @@ GTKWAVE   := gtkwave
 IVFLAGS   := -g2012
 
 # ─── 目录 ──────────────────────────────────────────────
-SRC_DIR   := Verilog/source
-SIM_DIR   := Verilog/sim
+SRC_DIR   := nandland/source
+SIM_DIR   := nandland/sim
 BUILD_DIR := build
 
 # ─── 源文件 ────────────────────────────────────────────

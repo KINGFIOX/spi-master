@@ -5,7 +5,7 @@
 
 module SPI_Master_TB ();
   
-  parameter SPI_MODE = 0; // CPOL = 1, CPHA = 1
+  parameter SPI_MODE = 0; // CPOL = 0, CPHA = 0
   parameter CLKS_PER_HALF_BIT = 4;  // 6.25 MHz
   parameter MAIN_CLK_DELAY = 2;  // 25 MHz
 

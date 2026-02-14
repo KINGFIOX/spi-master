@@ -81,20 +81,17 @@ module SPI_Master
   assign w_CPHA  = (SPI_MODE == 1) | (SPI_MODE == 3);
 
 
-
   // Purpose: Generate SPI Clock correct number of times when DV pulse comes
   always @(posedge i_Clk or negedge i_Rst_L)
   begin
-    if (~i_Rst_L)
-    begin
+    if (~i_Rst_L) begin
       o_TX_Ready      <= 1'b0;
       r_SPI_Clk_Edges <= 0;
       r_Leading_Edge  <= 1'b0;
       r_Trailing_Edge <= 1'b0;
       r_SPI_Clk       <= w_CPOL; // assign default state to idle state
       r_SPI_Clk_Count <= 0;
-    end
-    else begin
+    end else begin
       // Default assignments (pulse)
       r_Leading_Edge  <= 1'b0;
       r_Trailing_Edge <= 1'b0;
