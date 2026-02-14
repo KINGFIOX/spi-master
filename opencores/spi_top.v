@@ -66,26 +66,17 @@ module spi_top (
   // Internal active-high reset (sub-modules use posedge rst)
   wire rst = ~presetn;
 
+  // mmio register
+  reg  [  `SPI_DIVIDER_LEN-1:0] divider; // Divider register
+  reg  [  `SPI_CTRL_BIT_NB-1:0] ctrl; // Control and status register
+  reg  [        `SPI_SS_NB-1:0] ss; // Slave select register
+  wire [     `SPI_MAX_CHAR-1:0] rx; // Rx register
+
   // Internal signals
-  reg  [  `SPI_DIVIDER_LEN-1:0] divider;  // Divider register
-  reg  [  `SPI_CTRL_BIT_NB-1:0] ctrl;     // Control and status register
-  reg  [        `SPI_SS_NB-1:0] ss;        // Slave select register
-  wire [     `SPI_MAX_CHAR-1:0] rx;        // Rx register
-  wire                          rx_negedge;
-  wire                          tx_negedge;
-  wire [`SPI_CHAR_LEN_BITS-1:0] char_len;
-  wire                          go;
-  wire                          lsb;
-  wire                          ie;
-  wire                          ass;
-  wire                          spi_divider_sel;
-  wire                          spi_ctrl_sel;
-  wire [                   3:0] spi_tx_sel;
-  wire                          spi_ss_sel;
-  wire                          tip; // transfer in progress
-  wire                          pos_edge;
-  wire                          neg_edge;
-  wire                          last_bit;
+  wire tip; // transfer in progress
+  wire pos_edge;
+  wire neg_edge;
+  wire last_bit;
 
   // ─── APB bus control ─────────────────────────────────────
   wire reg_write = psel & penable & pwrite;   // write in access phase
@@ -95,16 +86,17 @@ module spi_top (
   assign pslverr = 1'b0;
 
   // ─── Address decoder ─────────────────────────────────────
-  assign spi_divider_sel = psel & (paddr[`SPI_OFS_BITS] == `SPI_DEVIDE);
-  assign spi_ctrl_sel    = psel & (paddr[`SPI_OFS_BITS] == `SPI_CTRL);
+  wire spi_divider_sel = psel & (paddr[`SPI_OFS_BITS] == `SPI_DEVIDE);
+  wire spi_ctrl_sel    = psel & (paddr[`SPI_OFS_BITS] == `SPI_CTRL);
+  wire spi_ss_sel      = psel & (paddr[`SPI_OFS_BITS] == `SPI_SS);
+  wire [3:0] spi_tx_sel;
   assign spi_tx_sel[0]   = psel & (paddr[`SPI_OFS_BITS] == `SPI_TX_0);
   assign spi_tx_sel[1]   = psel & (paddr[`SPI_OFS_BITS] == `SPI_TX_1);
   assign spi_tx_sel[2]   = psel & (paddr[`SPI_OFS_BITS] == `SPI_TX_2);
   assign spi_tx_sel[3]   = psel & (paddr[`SPI_OFS_BITS] == `SPI_TX_3);
-  assign spi_ss_sel      = psel & (paddr[`SPI_OFS_BITS] == `SPI_SS);
 
   // ─── Read from registers (combinational) ─────────────────
-  reg [31:0] prdata_mux;
+  reg [31:0] prdata_mux; // just amused the compiler
   always @(*) begin
     case (paddr[`SPI_OFS_BITS])
       `SPI_RX_0:   prdata_mux = rx[31:0];
@@ -128,7 +120,7 @@ module spi_top (
 
   // ─── Divider register (16-bit, byte-lane write) ──────────
   always @(posedge pclk or negedge presetn) begin
-    if (!presetn) divider <= {`SPI_DIVIDER_LEN{1'b0}};
+    if (!presetn) divider <= {`SPI_DIVIDER_LEN{1'b1}};
     else if (reg_write && spi_divider_sel && !tip) begin
       if (pstrb[0]) divider[ 7:0] <= pwdata[ 7:0];
       if (pstrb[1]) divider[15:8] <= pwdata[15:8];
@@ -144,13 +136,13 @@ module spi_top (
     end else if (tip && last_bit && pos_edge) ctrl[`SPI_CTRL_GO] <= 1'b0;
   end
 
-  assign rx_negedge = ctrl[`SPI_CTRL_RX_NEGEDGE];
-  assign tx_negedge = ctrl[`SPI_CTRL_TX_NEGEDGE];
-  assign go         = ctrl[`SPI_CTRL_GO];
-  assign char_len   = ctrl[`SPI_CTRL_CHAR_LEN];
-  assign lsb        = ctrl[`SPI_CTRL_LSB];
-  assign ie         = ctrl[`SPI_CTRL_IE];
-  assign ass        = ctrl[`SPI_CTRL_ASS];
+  wire [`SPI_CHAR_LEN_BITS-1:0] char_len = ctrl[`SPI_CTRL_CHAR_LEN];
+  wire rx_negedge = ctrl[`SPI_CTRL_RX_NEGEDGE];
+  wire tx_negedge = ctrl[`SPI_CTRL_TX_NEGEDGE];
+  wire go         = ctrl[`SPI_CTRL_GO];
+  wire lsb        = ctrl[`SPI_CTRL_LSB];
+  wire ie         = ctrl[`SPI_CTRL_IE];
+  wire ass        = ctrl[`SPI_CTRL_ASS];
 
   // ─── Slave select register (8-bit) ──────────────────────
   always @(posedge pclk or negedge presetn) begin

@@ -222,7 +222,7 @@ int main(int argc, char** argv) {
     // 先做一次热身传输使 SPI 时钟发生器进入稳态。
     {
         printf("── 热身: 首次传输 (复位后) ──\n");
-        uint32_t rx = spi_transfer(0xFF, 8, 2);
+        uint32_t rx = spi_transfer(0xFF, 8, 4);
         printf("  TX = 0xFF, RX = 0x%02X (回环初始态偏移属正常)\n\n",
                rx & 0xFF);
     }
@@ -230,7 +230,7 @@ int main(int argc, char** argv) {
     // ─── 测试 1: 8 位回环 ─────────────────────────────
     {
         printf("── 测试 1: 8 位回环 (TX=0xA5, 分频=2) ──\n");
-        uint32_t rx = spi_transfer(0xA5, 8, 2);
+        uint32_t rx = spi_transfer(0xA5, 8, 4);
         printf("  TX = 0x%02X, RX = 0x%02X\n", 0xA5, rx & 0xFF);
         check("8-bit loopback", 0xA5, rx, 0xFF);
         printf("\n");
@@ -239,7 +239,7 @@ int main(int argc, char** argv) {
     // ─── 测试 2: 16 位回环 ────────────────────────────
     {
         printf("── 测试 2: 16 位回环 (TX=0xBEEF, 分频=2) ──\n");
-        uint32_t rx = spi_transfer(0xBEEF, 16, 2);
+        uint32_t rx = spi_transfer(0xBEEF, 16, 4);
         printf("  TX = 0x%04X, RX = 0x%04X\n", 0xBEEF, rx & 0xFFFF);
         check("16-bit loopback", 0xBEEF, rx, 0xFFFF);
         printf("\n");
@@ -248,7 +248,7 @@ int main(int argc, char** argv) {
     // ─── 测试 3: 32 位回环 ────────────────────────────
     {
         printf("── 测试 3: 32 位回环 (TX=0xDEADBEEF, 分频=2) ──\n");
-        uint32_t rx = spi_transfer(0xDEADBEEF, 32, 2);
+        uint32_t rx = spi_transfer(0xDEADBEEF, 32, 4);
         printf("  TX = 0x%08X, RX = 0x%08X\n", (unsigned)0xDEADBEEF, rx);
         check("32-bit loopback", 0xDEADBEEF, rx, 0xFFFFFFFF);
         printf("\n");
