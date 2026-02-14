@@ -69,6 +69,7 @@ module spi_shift (clk, rst, latch, byte_sel, len, lsb, go,
   reg                            s_out;
   reg                            tip;
 
+  integer                        i;            // loop variable for data loading
   reg     [`SPI_CHAR_LEN_BITS:0] cnt;          // data bit count
   reg        [`SPI_MAX_CHAR-1:0] data;         // shift register
   wire    [`SPI_CHAR_LEN_BITS:0] tx_bit_pos;   // next bit position
@@ -122,114 +123,22 @@ module spi_shift (clk, rst, latch, byte_sel, len, lsb, go,
   end
 
   // Receiving bits from the line
+  // 发送数据加载: latch[i] 选择第 i 个 32 位字写入 data[i*32+31 : i*32]
+  // 接收数据采样: rx_clk 有效时将 s_in 写入 data[rx_bit_pos]
   always @(posedge clk or posedge rst)
   begin
     if (rst)
-      data   <= #Tp {`SPI_MAX_CHAR{1'b0}};
-`ifdef SPI_MAX_CHAR_128 // {
-    else if (latch[0] && !tip)
-      begin
-        if (byte_sel[3])
-          data[31:24] <= #Tp p_in[31:24];
-        if (byte_sel[2])
-          data[23:16] <= #Tp p_in[23:16];
-        if (byte_sel[1])
-          data[15:8] <= #Tp p_in[15:8];
-        if (byte_sel[0])
-          data[7:0] <= #Tp p_in[7:0];
+      data <= #Tp {`SPI_MAX_CHAR{1'b0}};
+    else if (!tip && |latch) begin
+      for (i = 0; i < 4; i = i + 1) begin
+        if (latch[i]) begin
+          if (byte_sel[0]) data[i*32      +: 8] <= #Tp p_in[ 7: 0];
+          if (byte_sel[1]) data[i*32 +  8 +: 8] <= #Tp p_in[15: 8];
+          if (byte_sel[2]) data[i*32 + 16 +: 8] <= #Tp p_in[23:16];
+          if (byte_sel[3]) data[i*32 + 24 +: 8] <= #Tp p_in[31:24];
+        end
       end
-    else if (latch[1] && !tip)
-      begin
-        if (byte_sel[3])
-          data[63:56] <= #Tp p_in[31:24];
-        if (byte_sel[2])
-          data[55:48] <= #Tp p_in[23:16];
-        if (byte_sel[1])
-          data[47:40] <= #Tp p_in[15:8];
-        if (byte_sel[0])
-          data[39:32] <= #Tp p_in[7:0];
-      end
-    else if (latch[2] && !tip)
-      begin
-        if (byte_sel[3])
-          data[95:88] <= #Tp p_in[31:24];
-        if (byte_sel[2])
-          data[87:80] <= #Tp p_in[23:16];
-        if (byte_sel[1])
-          data[79:72] <= #Tp p_in[15:8];
-        if (byte_sel[0])
-          data[71:64] <= #Tp p_in[7:0];
-      end
-    else if (latch[3] && !tip)
-      begin
-        if (byte_sel[3])
-          data[127:120] <= #Tp p_in[31:24];
-        if (byte_sel[2])
-          data[119:112] <= #Tp p_in[23:16];
-        if (byte_sel[1])
-          data[111:104] <= #Tp p_in[15:8];
-        if (byte_sel[0])
-          data[103:96] <= #Tp p_in[7:0];
-      end
-`else // } else {
-`ifdef SPI_MAX_CHAR_64 // {
-    else if (latch[0] && !tip)
-      begin
-        if (byte_sel[3])
-          data[31:24] <= #Tp p_in[31:24];
-        if (byte_sel[2])
-          data[23:16] <= #Tp p_in[23:16];
-        if (byte_sel[1])
-          data[15:8] <= #Tp p_in[15:8];
-        if (byte_sel[0])
-          data[7:0] <= #Tp p_in[7:0];
-      end
-    else if (latch[1] && !tip)
-      begin
-        if (byte_sel[3])
-          data[63:56] <= #Tp p_in[31:24];
-        if (byte_sel[2])
-          data[55:48] <= #Tp p_in[23:16];
-        if (byte_sel[1])
-          data[47:40] <= #Tp p_in[15:8];
-        if (byte_sel[0])
-          data[39:32] <= #Tp p_in[7:0];
-      end
-`else // } else {
-    else if (latch[0] && !tip)
-      begin
-      `ifdef SPI_MAX_CHAR_8
-        if (byte_sel[0])
-          data[`SPI_MAX_CHAR-1:0] <= #Tp p_in[`SPI_MAX_CHAR-1:0];
-      `endif
-      `ifdef SPI_MAX_CHAR_16
-        if (byte_sel[0])
-          data[7:0] <= #Tp p_in[7:0];
-        if (byte_sel[1])
-          data[`SPI_MAX_CHAR-1:8] <= #Tp p_in[`SPI_MAX_CHAR-1:8];
-      `endif
-      `ifdef SPI_MAX_CHAR_24
-        if (byte_sel[0])
-          data[7:0] <= #Tp p_in[7:0];
-        if (byte_sel[1])
-          data[15:8] <= #Tp p_in[15:8];
-        if (byte_sel[2])
-          data[`SPI_MAX_CHAR-1:16] <= #Tp p_in[`SPI_MAX_CHAR-1:16];
-      `endif
-      `ifdef SPI_MAX_CHAR_32
-        if (byte_sel[0])
-          data[7:0] <= #Tp p_in[7:0];
-        if (byte_sel[1])
-          data[15:8] <= #Tp p_in[15:8];
-        if (byte_sel[2])
-          data[23:16] <= #Tp p_in[23:16];
-        if (byte_sel[3])
-          data[`SPI_MAX_CHAR-1:24] <= #Tp p_in[`SPI_MAX_CHAR-1:24];
-      `endif
-      end
-`endif // }
-`endif // }
-    else
+    end else
       data[rx_bit_pos[`SPI_CHAR_LEN_BITS-1:0]] <= #Tp rx_clk ? s_in : data[rx_bit_pos[`SPI_CHAR_LEN_BITS-1:0]];
   end
 

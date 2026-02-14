@@ -38,45 +38,12 @@
 ////                                                              ////
 //////////////////////////////////////////////////////////////////////
 
-//
-// Number of bits used for devider register. If used in system with
-// low frequency of system clock this can be reduced.
-// Use SPI_DIVIDER_LEN for fine tuning theexact number.
-//
-//`define SPI_DIVIDER_LEN_8
-`define SPI_DIVIDER_LEN_16
-//`define SPI_DIVIDER_LEN_24
-//`define SPI_DIVIDER_LEN_32
+`define SPI_DIVIDER_LEN 16
 
-`ifdef SPI_DIVIDER_LEN_8
-`define SPI_DIVIDER_LEN 8    // Can be set from 1 to 8
-`endif
-`ifdef SPI_DIVIDER_LEN_16
-`define SPI_DIVIDER_LEN 16   // Can be set from 9 to 16
-`endif
-`ifdef SPI_DIVIDER_LEN_24
-`define SPI_DIVIDER_LEN 24   // Can be set from 17 to 24
-`endif
-`ifdef SPI_DIVIDER_LEN_32
-`define SPI_DIVIDER_LEN 32   // Can be set from 25 to 32
-`endif
-
-//
-// Maximum nuber of bits that can be send/received at once.
-// Use SPI_MAX_CHAR for fine tuning the exact number, when using
-// SPI_MAX_CHAR_32, SPI_MAX_CHAR_24, SPI_MAX_CHAR_16, SPI_MAX_CHAR_8.
-//
-`define SPI_MAX_CHAR_128
-
-`define SPI_MAX_CHAR 128  // Can only be set to 128
+`define SPI_MAX_CHAR 128
 `define SPI_CHAR_LEN_BITS 7
 
-//
-// Number of device select signals. Use SPI_SS_NB for fine tuning the
-// exact number.
-//
-`define SPI_SS_NB_8
-`define SPI_SS_NB 8    // Can be set from 1 to 8
+`define SPI_SS_NB 8
 
 //
 // Bits of WISHBONE address used for partial decoding of SPI registers.

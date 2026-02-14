@@ -123,24 +123,10 @@ module spi_top (
   // Read from registers
   always @(wb_adr_i or rx or ctrl or divider or ss) begin
     case (wb_adr_i[`SPI_OFS_BITS])
-`ifdef SPI_MAX_CHAR_128
       `SPI_RX_0:   wb_dat = rx[31:0];
       `SPI_RX_1:   wb_dat = rx[63:32];
       `SPI_RX_2:   wb_dat = rx[95:64];
-      `SPI_RX_3:   wb_dat = {{128 - `SPI_MAX_CHAR{1'b0}}, rx[`SPI_MAX_CHAR-1:96]};
-`else
-`ifdef SPI_MAX_CHAR_64
-      `SPI_RX_0:   wb_dat = rx[31:0];
-      `SPI_RX_1:   wb_dat = {{64 - `SPI_MAX_CHAR{1'b0}}, rx[`SPI_MAX_CHAR-1:32]};
-      `SPI_RX_2:   wb_dat = 32'b0;
-      `SPI_RX_3:   wb_dat = 32'b0;
-`else
-      `SPI_RX_0:   wb_dat = {{32 - `SPI_MAX_CHAR{1'b0}}, rx[`SPI_MAX_CHAR-1:0]};
-      `SPI_RX_1:   wb_dat = 32'b0;
-      `SPI_RX_2:   wb_dat = 32'b0;
-      `SPI_RX_3:   wb_dat = 32'b0;
-`endif
-`endif
+      `SPI_RX_3:   wb_dat = rx[`SPI_MAX_CHAR-1:96];
       `SPI_CTRL:   wb_dat = {{32 - `SPI_CTRL_BIT_NB{1'b0}}, ctrl};
       `SPI_DEVIDE: wb_dat = {{32 - `SPI_DIVIDER_LEN{1'b0}}, divider};
       `SPI_SS:     wb_dat = {{32 - `SPI_SS_NB{1'b0}}, ss};
@@ -170,28 +156,12 @@ module spi_top (
     else if (wb_ack_o) wb_int_o <= #Tp 1'b0;
   end
 
-  // Divider register
+  // Divider register (16-bit, byte-lane write)
   always @(posedge wb_clk_i or posedge wb_rst_i) begin
     if (wb_rst_i) divider <= #Tp{`SPI_DIVIDER_LEN{1'b0}};
     else if (spi_divider_sel && wb_we_i && !tip) begin
-`ifdef SPI_DIVIDER_LEN_8
-      if (wb_sel_i[0]) divider <= #Tp wb_dat_i[`SPI_DIVIDER_LEN-1:0];
-`endif
-`ifdef SPI_DIVIDER_LEN_16
-      if (wb_sel_i[0]) divider[7:0] <= #Tp wb_dat_i[7:0];
-      if (wb_sel_i[1]) divider[`SPI_DIVIDER_LEN-1:8] <= #Tp wb_dat_i[`SPI_DIVIDER_LEN-1:8];
-`endif
-`ifdef SPI_DIVIDER_LEN_24
-      if (wb_sel_i[0]) divider[7:0] <= #Tp wb_dat_i[7:0];
+      if (wb_sel_i[0]) divider[ 7:0] <= #Tp wb_dat_i[ 7:0];
       if (wb_sel_i[1]) divider[15:8] <= #Tp wb_dat_i[15:8];
-      if (wb_sel_i[2]) divider[`SPI_DIVIDER_LEN-1:16] <= #Tp wb_dat_i[`SPI_DIVIDER_LEN-1:16];
-`endif
-`ifdef SPI_DIVIDER_LEN_32
-      if (wb_sel_i[0]) divider[7:0] <= #Tp wb_dat_i[7:0];
-      if (wb_sel_i[1]) divider[15:8] <= #Tp wb_dat_i[15:8];
-      if (wb_sel_i[2]) divider[23:16] <= #Tp wb_dat_i[23:16];
-      if (wb_sel_i[3]) divider[`SPI_DIVIDER_LEN-1:24] <= #Tp wb_dat_i[`SPI_DIVIDER_LEN-1:24];
-`endif
     end
   end
 
@@ -212,28 +182,11 @@ module spi_top (
   assign ie         = ctrl[`SPI_CTRL_IE];
   assign ass        = ctrl[`SPI_CTRL_ASS];
 
-  // Slave select register
+  // Slave select register (8-bit)
   always @(posedge wb_clk_i or posedge wb_rst_i) begin
     if (wb_rst_i) ss <= #Tp{`SPI_SS_NB{1'b0}};
     else if (spi_ss_sel && wb_we_i && !tip) begin
-`ifdef SPI_SS_NB_8
       if (wb_sel_i[0]) ss <= #Tp wb_dat_i[`SPI_SS_NB-1:0];
-`endif
-`ifdef SPI_SS_NB_16
-      if (wb_sel_i[0]) ss[7:0] <= #Tp wb_dat_i[7:0];
-      if (wb_sel_i[1]) ss[`SPI_SS_NB-1:8] <= #Tp wb_dat_i[`SPI_SS_NB-1:8];
-`endif
-`ifdef SPI_SS_NB_24
-      if (wb_sel_i[0]) ss[7:0] <= #Tp wb_dat_i[7:0];
-      if (wb_sel_i[1]) ss[15:8] <= #Tp wb_dat_i[15:8];
-      if (wb_sel_i[2]) ss[`SPI_SS_NB-1:16] <= #Tp wb_dat_i[`SPI_SS_NB-1:16];
-`endif
-`ifdef SPI_SS_NB_32
-      if (wb_sel_i[0]) ss[7:0] <= #Tp wb_dat_i[7:0];
-      if (wb_sel_i[1]) ss[15:8] <= #Tp wb_dat_i[15:8];
-      if (wb_sel_i[2]) ss[23:16] <= #Tp wb_dat_i[23:16];
-      if (wb_sel_i[3]) ss[`SPI_SS_NB-1:24] <= #Tp wb_dat_i[`SPI_SS_NB-1:24];
-`endif
     end
   end
 
