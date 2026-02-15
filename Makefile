@@ -4,11 +4,13 @@
 #   make sim_cs         - [iverilog] 仿真 nandland SPI_Master_With_Single_CS
 #   make sim_opencores  - [verilator] 仿真 OpenCores SPI Master (回环测试)
 #   make sim_chisel     - [verilator] 仿真 Chisel SPI Master (回环测试)
+#   make sim_bitrev     - [verilator] 仿真 Chisel SPI Master + BitRev Slave
 #   make all            - 仿真全部
 #   make wave_master    - 仿真并用 gtkwave 打开波形 (SPI_Master)
 #   make wave_cs        - 仿真并用 gtkwave 打开波形 (SPI_Master_With_Single_CS)
 #   make wave_opencores - 仿真并用 gtkwave 打开波形 (OpenCores SPI)
 #   make wave_chisel    - 仿真并用 gtkwave 打开波形 (Chisel SPI)
+#   make wave_bitrev    - 仿真并用 gtkwave 打开波形 (BitRev Slave)
 #   make clean          - 清理生成文件
 
 # ─── 工具 ──────────────────────────────────────────────
@@ -57,12 +59,20 @@ CH_VDIR      := $(BUILD_DIR)/verilator_chisel
 CH_EXE       := $(CH_VDIR)/VSPI
 CH_VCD       := $(BUILD_DIR)/chisel_spi.vcd
 
-# ─── 默认目标 ──────────────────────────────────────────
-.PHONY: all sim_master sim_cs sim_opencores sim_chisel \
-        wave_master wave_cs wave_opencores wave_chisel \
-        elaborate_chisel rtl_chisel clean
+# ─── BitRev Slave 测试文件 (Chisel harness) ───────────
+BT_ELABORATE := $(BUILD_DIR)/bitrev_top
+BT_RTL       := $(BUILD_DIR)/bitrev_rtl
+BR_TB_CPP    := $(OC_SIM)/sim_bitrev_spi.cpp
+BR_VDIR      := $(BUILD_DIR)/verilator_bitrev
+BR_EXE       := $(BR_VDIR)/VSPIBitRevTop
+BR_VCD       := $(BUILD_DIR)/bitrev_spi.vcd
 
-all: sim_master sim_cs sim_opencores sim_chisel
+# ─── 默认目标 ──────────────────────────────────────────
+.PHONY: all sim_master sim_cs sim_opencores sim_chisel sim_bitrev \
+        wave_master wave_cs wave_opencores wave_chisel wave_bitrev \
+        elaborate_chisel rtl_chisel elaborate_bitrev rtl_bitrev clean
+
+all: sim_master sim_cs sim_opencores sim_chisel sim_bitrev
 
 # ═══════════════════════════════════════════════════════
 #  nandland SPI_Master 仿真 (Icarus Verilog)
@@ -164,6 +174,53 @@ sim_chisel: $(CH_VCD)
 
 wave_chisel: $(CH_VCD)
 	$(GTKWAVE) $(CH_VCD) &
+
+# ═══════════════════════════════════════════════════════
+#  Chisel SPI + BitRev Slave 仿真 (Chisel harness)
+#  连线在 Chisel 中完成 (SPIBitRevTop)
+# ═══════════════════════════════════════════════════════
+
+# Step 1: Elaborate SPIBitRevTop → FIRRTL
+$(BT_ELABORATE)/SPIBitRevTop.fir: spi/src/*.scala elaborator/src/SPIBitRevTop.scala configs/SPIBitRevTop.json | $(BUILD_DIR)
+	@mkdir -p $(BT_ELABORATE)
+	$(MILL) -i elaborator.runMain org.chipsalliance.spi.elaborator.SPIBitRevTopMain \
+		design --parameter configs/SPIBitRevTop.json --target-dir $(BT_ELABORATE)
+
+elaborate_bitrev: $(BT_ELABORATE)/SPIBitRevTop.fir
+
+# Step 2: FIRRTL → SystemVerilog
+$(BT_RTL)/SPIBitRevTop.sv: $(BT_ELABORATE)/SPIBitRevTop.fir
+	@mkdir -p $(BT_RTL)
+	$(FIRTOOL) $(BT_ELABORATE)/SPIBitRevTop.fir \
+		--annotation-file $(BT_ELABORATE)/SPIBitRevTop.anno.json \
+		-O=release --split-verilog \
+		--preserve-values=all \
+		--lowering-options=verifLabels,omitVersionComment \
+		--strip-debug-info \
+		--disable-all-randomization \
+		-o $(BT_RTL)
+
+rtl_bitrev: $(BT_RTL)/SPIBitRevTop.sv
+
+# Step 3: Verilator compile
+$(BR_EXE): $(BT_RTL)/SPIBitRevTop.sv $(BR_TB_CPP)
+	$(VERILATOR) --cc --exe --build --trace \
+		--top-module SPIBitRevTop \
+		--Mdir $(BR_VDIR) \
+		-Wno-WIDTH -Wno-CASEINCOMPLETE -Wno-UNUSEDSIGNAL \
+		-I$(BT_RTL) -f $(BT_RTL)/filelist.f \
+		$(BR_TB_CPP) \
+		-o VSPIBitRevTop
+
+# Step 4: Run simulation
+$(BR_VCD): $(BR_EXE) | $(BUILD_DIR)
+	$(BR_EXE)
+
+sim_bitrev: $(BR_VCD)
+	@echo "✓ BitRev SPI 仿真完成，波形文件: $(BR_VCD)"
+
+wave_bitrev: $(BR_VCD)
+	$(GTKWAVE) $(BR_VCD) &
 
 # ═══════════════════════════════════════════════════════
 #  辅助
