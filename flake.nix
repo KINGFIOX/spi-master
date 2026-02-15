@@ -80,6 +80,7 @@
                   python3
                   clang-tools
                   gtkwave
+                  bear
                 ];
                 RUST_SRC_PATH = "${rust.packages.stable.rustPlatform.rustLibSrc}";
               }

@@ -6,7 +6,9 @@
 .vscode/
 !.envrc
 .direnv/
+.cache
 build
+compile_commands.json
 
 out/
 result*
