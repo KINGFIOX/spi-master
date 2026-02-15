@@ -185,7 +185,7 @@ class SPIShift(parameter: SPIParameter) extends Module {
   val io = IO(new Bundle {
     val latch     = Input(UInt(4.W))     // per-word load enable
     val byteSel   = Input(UInt(4.W))     // byte-lane strobes
-    val len       = Input(UInt(cBits.W)) // character length (0 = maxChar)
+    val len       = Input(UInt(cBits.W)) // charLen (0 = maxChar)
     val go        = Input(Bool())
     val posEdge   = Input(Bool())
     val negEdge   = Input(Bool())
@@ -328,8 +328,6 @@ class SPI(val parameter: SPIParameter)
   val regAddr  = io.paddr(4, 2) // byte address → word offset
   val regWrite = io.psel & io.penable & io.pwrite
 
-  // Simple APB slave: no wait states, no errors
-  io.pready  := true.B
   io.pslverr := false.B
 
   // Address selects
@@ -347,6 +345,15 @@ class SPI(val parameter: SPIParameter)
   val posEdge = clgen.io.posEdge
   val negEdge = clgen.io.negEdge
   val rx      = shift.io.pOut // maxChar-bit receive data
+
+  // Flow control during SPI transfer (tip=1):
+  //   - Writes to any register:  blocked (pready=0), otherwise silently dropped.
+  //   - Reads of TX/RX data (addr 0-3): blocked (pready=0), shift register
+  //     is actively changing and would return torn/inconsistent data.
+  //   - Reads of CTRL/DIVIDER/SS (addr 4-6): allowed (pready=1),
+  //     so software can poll CTRL GO bit to know when transfer finishes.
+  val isTxAddr = regAddr < 4.U
+  io.pready := !tip || (!io.pwrite && !isTxAddr)
 
   // Clgen connections
   clgen.io.go      := go

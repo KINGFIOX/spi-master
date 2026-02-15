@@ -27,10 +27,10 @@ static int            test_pass = 0;
 static int            test_fail = 0;
 
 static void tick() {
-    dut->clock = 0;
+    dut->clock = 1;
     dut->eval();
     if (tfp) tfp->dump(sim_time++);
-    dut->clock = 1;
+    dut->clock = 0;
     dut->eval();
     if (tfp) tfp->dump(sim_time++);
 }
@@ -49,6 +49,7 @@ static void do_reset() {
 }
 
 static void apb_write(uint8_t addr, uint32_t data) {
+    // SETUP phase: PSEL=1, PENABLE=0
     dut->paddr   = addr;
     dut->pwdata  = data;
     dut->pstrb   = 0xF;
@@ -56,35 +57,33 @@ static void apb_write(uint8_t addr, uint32_t data) {
     dut->psel    = 1;
     dut->penable = 0;
     tick();
+    // ACCESS phase: PENABLE=1, wait for PREADY
     dut->penable = 1;
-    tick();
+    do { tick(); } while (!dut->pready);
+    // IDLE phase: PSEL=0, PENABLE=0
     dut->psel    = 0;
     dut->penable = 0;
     dut->pwrite  = 0;
+    tick();
 }
 
 static uint32_t apb_read(uint8_t addr) {
+    // SETUP phase: PSEL=1, PENABLE=0
     dut->paddr   = addr;
     dut->pwrite  = 0;
     dut->pstrb   = 0xF;
     dut->psel    = 1;
     dut->penable = 0;
     tick();
+    // ACCESS phase: PENABLE=1, wait for PREADY
     dut->penable = 1;
-    tick();
+    do { tick(); } while (!dut->pready);
     uint32_t val = dut->prdata;
+    // IDLE phase: PSEL=0, PENABLE=0
     dut->psel    = 0;
     dut->penable = 0;
+    tick();
     return val;
-}
-
-static bool wait_xfer_done(int timeout = 100000) {
-    while (timeout-- > 0) {
-        uint32_t ctrl = apb_read(ADDR_CTRL);
-        if (!(ctrl & CTRL_GO)) return true;
-    }
-    printf("  ERROR: transfer timeout!\n");
-    return false;
 }
 
 static void check(const char* name, uint32_t expected, uint32_t actual,
@@ -114,7 +113,8 @@ static uint8_t bitrev_transfer(uint8_t tx_byte, uint32_t divider) {
     uint32_t ctrl_base = 16 | CTRL_ASS | CTRL_TX_NEG;
     apb_write(ADDR_CTRL, ctrl_base);
     apb_write(ADDR_CTRL, ctrl_base | CTRL_GO);
-    wait_xfer_done();
+    // pready blocks TX/RX reads during transfer — no polling needed.
+    // apb_read will wait until the transfer finishes, then return RX data.
     uint32_t rx = apb_read(ADDR_TX0);
     return (uint8_t)(rx & 0xFF);
 }

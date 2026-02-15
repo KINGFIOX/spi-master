@@ -48,14 +48,14 @@ static int             test_fail = 0;
 // One full system clock cycle (falling edge → rising edge)
 // MOSI is looped back to MISO
 static void tick() {
-    // Falling edge
-    dut->clock = 0;
+    // Rising edge
+    dut->clock = 1;
     dut->misoPadI = dut->mosiPadO;  // loopback
     dut->eval();
     if (tfp) tfp->dump(sim_time++);
 
-    // Rising edge
-    dut->clock = 1;
+    // Falling edge
+    dut->clock = 0;
     dut->misoPadI = dut->mosiPadO;  // loopback
     dut->eval();
     if (tfp) tfp->dump(sim_time++);
@@ -81,7 +81,7 @@ static void do_reset() {
 
 // ─── APB write ──────────────────────────────────────────────────────────
 static void apb_write(uint8_t addr, uint32_t data) {
-    // Setup phase: PSEL=1, PENABLE=0
+    // SETUP phase: PSEL=1, PENABLE=0
     dut->paddr   = addr;
     dut->pwdata  = data;
     dut->pstrb   = 0xF;
@@ -90,19 +90,20 @@ static void apb_write(uint8_t addr, uint32_t data) {
     dut->penable = 0;
     tick();
 
-    // Access phase: PENABLE=1
+    // ACCESS phase: PENABLE=1, wait for PREADY
     dut->penable = 1;
-    tick();
+    do { tick(); } while (!dut->pready);
 
-    // Idle
+    // IDLE phase: PSEL=0, PENABLE=0
     dut->psel    = 0;
     dut->penable = 0;
     dut->pwrite  = 0;
+    tick();
 }
 
 // ─── APB read ───────────────────────────────────────────────────────────
 static uint32_t apb_read(uint8_t addr) {
-    // Setup phase
+    // SETUP phase: PSEL=1, PENABLE=0
     dut->paddr   = addr;
     dut->pwrite  = 0;
     dut->pstrb   = 0xF;
@@ -110,27 +111,18 @@ static uint32_t apb_read(uint8_t addr) {
     dut->penable = 0;
     tick();
 
-    // Access phase
+    // ACCESS phase: PENABLE=1, wait for PREADY
     dut->penable = 1;
-    tick();
+    do { tick(); } while (!dut->pready);
 
     uint32_t data = dut->prdata;
 
-    // Idle
+    // IDLE phase: PSEL=0, PENABLE=0
     dut->psel    = 0;
     dut->penable = 0;
+    tick();
 
     return data;
-}
-
-// ─── Wait for transfer complete ─────────────────────────────────────────
-static bool wait_xfer_done(int timeout = 100000) {
-    while (timeout-- > 0) {
-        uint32_t ctrl = apb_read(ADDR_CTRL);
-        if (!(ctrl & CTRL_GO)) return true;
-    }
-    printf("  ERROR: transfer timeout!\n");
-    return false;
 }
 
 // ─── Result check ───────────────────────────────────────────────────────
@@ -157,8 +149,8 @@ static uint32_t spi_transfer(uint32_t tx_data, uint32_t char_len,
     uint32_t ctrl = (char_len & 0x7F) | CTRL_GO | CTRL_ASS | CTRL_TX_NEG;
     apb_write(ADDR_CTRL, ctrl);
 
-    wait_xfer_done();
-
+    // pready blocks TX/RX reads during transfer — no polling needed.
+    // apb_read will wait until the transfer finishes, then return RX data.
     return apb_read(ADDR_TX0);
 }
 
