@@ -12,6 +12,7 @@ import chisel3.properties.{AnyClassType, Class, Property}
 
 // ═══════════════════════════════════════════════════════════════════
 // Parameter
+// cofigs/SPI.json, used for the parameter deserialize from json to case class
 // ═══════════════════════════════════════════════════════════════════
 
 object SPIParameter {
@@ -61,6 +62,7 @@ class SPIProbe(parameter: SPIParameter) extends Bundle {
 
 // ═══════════════════════════════════════════════════════════════════
 // Object Model (metadata)
+// used to export metadata to downstream toolchains
 // ═══════════════════════════════════════════════════════════════════
 
 /** Metadata of [[SPI]]. */
