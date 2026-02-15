@@ -186,7 +186,6 @@ class SPIShift(parameter: SPIParameter) extends Module {
     val latch     = Input(UInt(4.W))     // per-word load enable
     val byteSel   = Input(UInt(4.W))     // byte-lane strobes
     val len       = Input(UInt(cBits.W)) // character length (0 = maxChar)
-    val lsb       = Input(Bool())
     val go        = Input(Bool())
     val posEdge   = Input(Bool())
     val negEdge   = Input(Bool())
@@ -194,16 +193,16 @@ class SPIShift(parameter: SPIParameter) extends Module {
     val txNegedge = Input(Bool())
     val tip       = Output(Bool())  // transfer in progress
     val last      = Output(Bool())  // last bit
-    val pIn       = Input(UInt(32.W))
-    val pOut      = Output(UInt(mChar.W))
-    val sClk      = Input(Bool())
-    val sIn       = Input(Bool())
-    val sOut      = Output(Bool())
+    val pIn       = Input(UInt(32.W)) // parallel input
+    val pOut      = Output(UInt(mChar.W)) // parallel output
+    val sClk      = Input(Bool()) // serial clock
+    val sIn       = Input(Bool()) // serial input
+    val sOut      = Output(Bool()) // serial output
   })
 
   // ─── State ──────────────────────────────────────────────────
-  val cnt  = RegInit(0.U((cBits + 1).W))                      // bit counter
-  val data = RegInit(VecInit(Seq.fill(mChar)(false.B)))        // shift register
+  val cnt  = RegInit(0.U((cBits + 1).W)) // bit counter
+  val data = RegInit(VecInit(Seq.fill(mChar)(false.B))) // shift register
   val sOut = RegInit(false.B)
   val tip  = RegInit(false.B)
 
@@ -214,12 +213,8 @@ class SPIShift(parameter: SPIParameter) extends Module {
   val lenExt = Cat(!io.len.orR, io.len)
 
   // Bit positions for TX and RX
-  val txBitPos = Mux(io.lsb, lenExt - cnt, cnt - 1.U)
-  val rxBitPos = Mux(
-    io.lsb,
-    lenExt - Mux(io.rxNegedge, cnt + 1.U, cnt),
-    Mux(io.rxNegedge, cnt, cnt - 1.U)
-  )
+  val txBitPos = cnt - 1.U
+  val rxBitPos = Mux(io.rxNegedge, cnt, cnt - 1.U)
 
   // Sampling clocks
   val rxClk = Mux(io.rxNegedge, io.negEdge, io.posEdge) && (!last || io.sClk)
@@ -326,7 +321,6 @@ class SPI(val parameter: SPIParameter)
   val go        = ctrl(8)
   val rxNegedge = ctrl(9)
   val txNegedge = ctrl(10)
-  val lsb       = ctrl(11)
   val ie        = ctrl(12)
   val ass       = ctrl(13)
 
@@ -364,7 +358,6 @@ class SPI(val parameter: SPIParameter)
   shift.io.len       := charLen
   shift.io.latch     := spiTxSel.asUInt & Fill(4, io.penable & io.pwrite)
   shift.io.byteSel   := io.pstrb
-  shift.io.lsb       := lsb
   shift.io.go        := go
   shift.io.posEdge   := posEdge
   shift.io.negEdge   := negEdge
@@ -376,7 +369,7 @@ class SPI(val parameter: SPIParameter)
 
   // ─── Read mux (combinational) ──────────────────────────────
   val prdataMux = WireDefault(0.U(32.W))
-  for (i <- 0 until P.nTxWords) {
+  for (i <- 0 until P.nTxWords) { // 0,1,2,3
     when(regAddr === i.U) {
       val hi = math.min(i * 32 + 31, P.maxChar - 1)
       val lo = i * 32
@@ -395,15 +388,15 @@ class SPI(val parameter: SPIParameter)
   // ─── Interrupt ──────────────────────────────────────────────
   when(ie && tip && lastBit && posEdge) {
     intReg := true.B
-  }.elsewhen(io.psel && io.penable) {
+  }.elsewhen(io.psel && io.penable) { // reset
     intReg := false.B
   }
   io.intO := intReg
 
   // ─── Divider register (byte-lane write, locked during tip) ─
   when(regWrite && spiDividerSel && !tip) {
-    val nBytes = P.dividerLen / 8
-    val mask   = Cat((0 until nBytes).reverse.map(j => Fill(8, io.pstrb(j))))
+    val nBytes = P.dividerLen / 8 // 2
+    val mask   = Cat((0 until nBytes).reverse/*1,0*/.map(j => Fill(8, io.pstrb(j))))
     divider := (io.pwdata(P.dividerLen - 1, 0) & mask) | (divider & ~mask)
   }
 
