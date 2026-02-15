@@ -246,14 +246,14 @@ class SPIShift(parameter: SPIParameter) extends Module {
   // ─── Data register: parallel load / serial receive ─────────
   when(!tip && io.latch.orR) {
     // Parallel load from bus (byte-lane writes to each 32-bit word)
-    for (i <- 0 until parameter.nTxWords) {
-      when(io.latch(i)) {
-        for (j <- 0 until 4) {
+    for (wordIdx <- 0 until parameter.nTxWords) { // 0,1,2,3
+      when(io.latch(wordIdx)) {
+        for (byteIdx <- 0 until 4) { // 0,1,2,3. each word is 32 bits, so 4 bytes
           // Guard: only generate logic for bytes within data width
-          if ((i * 32 + (j + 1) * 8) <= mChar) {
-            when(io.byteSel(j)) {
-              for (b <- 0 until 8) {
-                data(i * 32 + j * 8 + b) := io.pIn(j * 8 + b)
+          if ((wordIdx * 32 + (byteIdx + 1) * 8) <= mChar) {
+            when(io.byteSel(byteIdx)) {
+              for (bitIdx <- 0 until 8) {
+                data(wordIdx * 32 + byteIdx * 8 + bitIdx) := io.pIn(byteIdx * 8 + bitIdx)
               }
             }
           }
