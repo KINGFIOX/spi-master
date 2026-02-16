@@ -12,7 +12,7 @@
 #include <cstdint>
 
 static constexpr uint8_t ADDR_TX0    = 0 << 2;
-static constexpr uint8_t ADDR_CTRL   = 4 << 2;
+static constexpr uint8_t ADDR_CTRL   = 4 << 2; // 16
 static constexpr uint8_t ADDR_DIVIDE = 5 << 2;
 static constexpr uint8_t ADDR_SS     = 6 << 2;
 
@@ -110,7 +110,7 @@ static uint8_t bitrev_transfer(uint8_t tx_byte, uint32_t divider) {
     apb_write(ADDR_DIVIDE, divider);
     apb_write(ADDR_SS, 0x01);
     apb_write(ADDR_TX0, (uint32_t)tx_byte << 8);
-    uint32_t ctrl_base = 16 | CTRL_ASS | CTRL_TX_NEG;
+    uint32_t ctrl_base = 16 /*charLen*/ | CTRL_ASS | CTRL_TX_NEG;
     apb_write(ADDR_CTRL, ctrl_base);
     apb_write(ADDR_CTRL, ctrl_base | CTRL_GO);
     // pready blocks TX/RX reads during transfer — no polling needed.

@@ -123,7 +123,7 @@ class SPIInterface(parameter: SPIParameter) extends Bundle {
 class SPIClgen(dividerLen: Int) extends Module {
   val io = IO(new Bundle {
     val go      = Input(Bool())
-    val enable  = Input(Bool())
+    val tip  = Input(Bool())
     val lastClk = Input(Bool())
     val divider = Input(UInt(dividerLen.W))
     val clkOut  = Output(Bool())
@@ -140,28 +140,30 @@ class SPIClgen(dividerLen: Int) extends Module {
   val divZero = !io.divider.orR
 
   // Counter counts half period
-  when(!io.enable || cntZero) {
+  when(!io.tip || cntZero) {
     cnt := io.divider
   }.otherwise {
     cnt := cnt - 1.U
   }
 
   // clk_out toggles every other half period
-  when(io.enable && cntZero && (!io.lastClk || clkOut)) {
+  // !io.lastCLK || clkOut <=> io.lastClk -> clkOut
+  // 如果是最后一次, 那么只有当 clkOut = 1 时, 才翻转, 这意味着最后一次永远是 1->0
+  when(io.tip && cntZero && (!io.lastClk || clkOut)) {
     clkOut := ~clkOut
   }
 
   // Positive-edge / negative-edge strobes (registered)
   io.posEdge := RegNext(
-    (io.enable && !clkOut && cntOne) ||
+    (io.tip && !clkOut && cntOne) ||
       (divZero && clkOut) ||
-      (divZero && io.go && !io.enable),
+      (divZero && io.go && !io.tip),
     false.B
   )
 
   io.negEdge := RegNext(
-    (io.enable && clkOut && cntOne) ||
-      (divZero && !clkOut && io.enable),
+    (io.tip && clkOut && cntOne) ||
+      (divZero && !clkOut && io.tip),
     false.B
   )
 
@@ -183,8 +185,8 @@ class SPIShift(parameter: SPIParameter) extends Module {
   private val mChar = parameter.maxChar
 
   val io = IO(new Bundle {
-    val latch     = Input(UInt(4.W))     // per-word load enable
-    val byteSel   = Input(UInt(4.W))     // byte-lane strobes
+    val latch     = Input(UInt(4.W)) // per-word load enable
+    val byteSel   = Input(UInt(4.W)) // byte-lane strobes
     val len       = Input(UInt(cBits.W)) // charLen (0 = maxChar)
     val go        = Input(Bool())
     val posEdge   = Input(Bool())
@@ -217,6 +219,7 @@ class SPIShift(parameter: SPIParameter) extends Module {
   val rxBitPos = Mux(io.rxNegedge, cnt, cnt - 1.U)
 
   // Sampling clocks
+  // !last || io.sClk <=> last -> io.sClk
   val rxClk = Mux(io.rxNegedge, io.negEdge, io.posEdge) && (!last || io.sClk)
   val txClk = Mux(io.txNegedge, io.negEdge, io.posEdge) && !last
 
@@ -357,7 +360,7 @@ class SPI(val parameter: SPIParameter)
 
   // Clgen connections
   clgen.io.go      := go
-  clgen.io.enable  := tip
+  clgen.io.tip  := tip
   clgen.io.lastClk := lastBit
   clgen.io.divider := divider
 
