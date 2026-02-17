@@ -215,13 +215,19 @@ class SPIShift(parameter: SPIParameter) extends Module {
   val lenExt = Cat(!io.len.orR, io.len)
 
   // Bit positions for TX and RX
-  val txBitPos = cnt - 1.U
-  val rxBitPos = Mux(io.rxNegedge, cnt, cnt - 1.U)
+  val txBitPos = cnt - 1.U; dontTouch(txBitPos)
+  val rxBitPos = Mux(io.rxNegedge, cnt, cnt - 1.U); dontTouch(rxBitPos)
 
   // Sampling clocks
-  // !last || io.sClk <=> last -> io.sClk
+  // ( !last || io.sClk ) <=> ( last -> io.sClk )
+  // FIXME: last=1 && io.sClk=1, 这种情况在 CPOL=0 时不会发生
   val rxClk = Mux(io.rxNegedge, io.negEdge, io.posEdge) && (!last || io.sClk)
+  dontTouch(rxClk);
+  // txNeg=1 时
+  // slave: `posedge sck`, slave 最后一次采样的时候, sOut 还不是新值
+  // slave: `negedge sck`, slave 最后一次采样, sOut 恰好还是旧值
   val txClk = Mux(io.txNegedge, io.negEdge, io.posEdge) && !last
+  dontTouch(txClk);
 
   // ─── Bit counter ────────────────────────────────────────────
   when(tip) {
@@ -247,6 +253,10 @@ class SPIShift(parameter: SPIParameter) extends Module {
   }
 
   // ─── Data register: parallel load / serial receive ─────────
+  // spi-master 对 cpu 暴露了几种 MMIO 的寄存器
+  // CTRL 放到了 SPI(Top) 中, 而 data 放到了 SPIShift 中, Rxx/Txx 是 data 的两种访问方式
+  // io.latch 是 word mask, 因为 apb 一次只能传输 32bit, 所以 io.latch 是 one-hot 的
+  // io.byteSel 是 byte mask
   when(!tip && io.latch.orR) {
     // Parallel load from bus (byte-lane writes to each 32-bit word)
     for (wordIdx <- 0 until parameter.nTxWords) { // 0,1,2,3
@@ -255,7 +265,7 @@ class SPIShift(parameter: SPIParameter) extends Module {
           // Guard: only generate logic for bytes within data width
           if ((wordIdx * 32 + (byteIdx + 1) * 8) <= mChar) {
             when(io.byteSel(byteIdx)) {
-              for (bitIdx <- 0 until 8) {
+              for (bitIdx <- 0 until 8) { // 逐 bit 写入
                 data(wordIdx * 32 + byteIdx * 8 + bitIdx) := io.pIn(byteIdx * 8 + bitIdx)
               }
             }
