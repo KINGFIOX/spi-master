@@ -139,7 +139,7 @@ int main(int argc, char** argv) {
 
     {
         printf("-- Warmup: bitrev(0xFF), divider=4 --\n");
-        uint8_t rx = bitrev_transfer(0xFF, 4);
+        uint8_t rx = bitrev_transfer(0xFF, 0);
         uint8_t exp = bit_reverse(0xFF);
         printf("  TX = 0xFF, RX = 0x%02X (expected 0x%02X)\n", rx, exp);
         check("warmup bitrev(0xFF)", exp, rx, 0xFF);
@@ -160,7 +160,7 @@ int main(int argc, char** argv) {
 
     for (const auto& tc : tests) {
         printf("-- Test: %s --\n", tc.name);
-        uint8_t rx  = bitrev_transfer(tc.tx, 4);
+        uint8_t rx  = bitrev_transfer(tc.tx, 0);
         uint8_t exp = bit_reverse(tc.tx);
         printf("  TX = 0x%02X -> reversed = 0x%02X, RX = 0x%02X\n",
                tc.tx, exp, rx);

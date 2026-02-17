@@ -147,7 +147,7 @@ class SPIClgen(dividerLen: Int) extends Module {
   }
 
   // clk_out toggles every other half period
-  // !io.lastCLK || clkOut <=> io.lastClk -> clkOut
+  // ( !io.lastCLK || clkOut ) <=> ( io.lastClk -> clkOut )
   // 如果是最后一次, 那么只有当 clkOut = 1 时, 才翻转, 这意味着最后一次永远是 1->0
   when(io.tip && cntZero && (!io.lastClk || clkOut)) {
     clkOut := ~clkOut
@@ -191,8 +191,6 @@ class SPIShift(parameter: SPIParameter) extends Module {
     val go        = Input(Bool())
     val posEdge   = Input(Bool())
     val negEdge   = Input(Bool())
-    val rxNegedge = Input(Bool())
-    val txNegedge = Input(Bool())
     val tip       = Output(Bool())  // transfer in progress
     val last      = Output(Bool())  // last bit
     val pIn       = Input(UInt(32.W)) // parallel input
@@ -212,19 +210,13 @@ class SPIShift(parameter: SPIParameter) extends Module {
   val last = !cnt.orR // cnt == 0
 
   // Bit positions for TX and RX
-  val txBitPos = cnt - 1.U; dontTouch(txBitPos)
-  val rxBitPos = Mux(io.rxNegedge, cnt, cnt - 1.U); dontTouch(rxBitPos)
+  val txBitPos = cnt - 1.U
+  val rxBitPos = cnt - 1.U
 
-  // Sampling clocks
-  // ( !last || io.sClk ) <=> ( last -> io.sClk )
-  // FIXME: last=1 && io.sClk=1, 这种情况在 CPOL=0 时不会发生
-  val rxClk = Mux(io.rxNegedge, io.negEdge, io.posEdge) && (!last || io.sClk)
-  dontTouch(rxClk);
-  // txNeg=1 时
-  // slave: `posedge sck`, slave 最后一次采样的时候, sOut 还不是新值
-  // slave: `negedge sck`, slave 最后一次采样, sOut 恰好还是旧值
-  val txClk = Mux(io.txNegedge, io.negEdge, io.posEdge) && !last
-  dontTouch(txClk);
+  val rxClk = io.posEdge && !last
+  dontTouch(rxClk)
+  val txClk = io.negEdge && !last
+  dontTouch(txClk)
 
   // ─── Bit counter ────────────────────────────────────────────
   when(tip) {
@@ -325,8 +317,6 @@ class SPI(val parameter: SPIParameter)
   // ─── Ctrl field extraction ─────────────────────────────────
   val charLen   = ctrl(P.charLenBits - 1, 0)
   val go        = ctrl(8)
-  val rxNegedge = ctrl(9)
-  val txNegedge = ctrl(10)
   val ie        = ctrl(12)
   val ass       = ctrl(13)
 
@@ -374,8 +364,6 @@ class SPI(val parameter: SPIParameter)
   shift.io.go        := go
   shift.io.posEdge   := posEdge
   shift.io.negEdge   := negEdge
-  shift.io.rxNegedge := rxNegedge
-  shift.io.txNegedge := txNegedge
   shift.io.pIn       := io.pwdata
   shift.io.sClk      := clgen.io.clkOut
   shift.io.sIn       := io.misoPadI
