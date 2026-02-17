@@ -187,7 +187,7 @@ class SPIShift(parameter: SPIParameter) extends Module {
   val io = IO(new Bundle {
     val latch     = Input(UInt(4.W)) // per-word load enable
     val byteSel   = Input(UInt(4.W)) // byte-lane strobes
-    val len       = Input(UInt(cBits.W)) // charLen (0 = maxChar)
+    val len       = Input(UInt(cBits.W)) // charLen (0 = no transfer)
     val go        = Input(Bool())
     val posEdge   = Input(Bool())
     val negEdge   = Input(Bool())
@@ -203,16 +203,13 @@ class SPIShift(parameter: SPIParameter) extends Module {
   })
 
   // ─── State ──────────────────────────────────────────────────
-  val cnt  = RegInit(0.U((cBits + 1).W)) // bit counter
+  val cnt  = RegInit(0.U(cBits.W)) // bit counter
   val data = RegInit(VecInit(Seq.fill(mChar)(false.B))) // shift register
   val sOut = RegInit(false.B)
   val tip  = RegInit(false.B)
 
   // ─── Combinational ─────────────────────────────────────────
   val last = !cnt.orR // cnt == 0
-
-  // Extend len: 0 → maxChar, n → n  (cBits+1 bits wide)
-  val lenExt = Cat(!io.len.orR, io.len)
 
   // Bit positions for TX and RX
   val txBitPos = cnt - 1.U; dontTouch(txBitPos)
@@ -233,15 +230,11 @@ class SPIShift(parameter: SPIParameter) extends Module {
   when(tip) {
     when(io.posEdge) { cnt := cnt - 1.U }
   }.otherwise {
-    cnt := Mux(
-      !io.len.orR,
-      Cat(1.U(1.W), 0.U(cBits.W)), // len=0 → maxChar
-      Cat(0.U(1.W), io.len)
-    )
+    cnt := io.len
   }
 
   // ─── Transfer in progress ──────────────────────────────────
-  when(io.go && !tip) {
+  when(io.go && !tip && io.len.orR) {
     tip := true.B
   }.elsewhen(tip && last && io.posEdge) {
     tip := false.B
@@ -249,7 +242,7 @@ class SPIShift(parameter: SPIParameter) extends Module {
 
   // ─── TX: send bits to line ─────────────────────────────────
   when(txClk || !tip) {
-    sOut := data(txBitPos(cBits - 1, 0))
+    sOut := data(txBitPos)
   }
 
   // ─── Data register: parallel load / serial receive ─────────
@@ -276,7 +269,7 @@ class SPIShift(parameter: SPIParameter) extends Module {
   }.otherwise {
     // Serial receive: sample MISO at rxBitPos
     when(rxClk) {
-      data(rxBitPos(cBits - 1, 0)) := io.sIn
+      data(rxBitPos) := io.sIn
     }
   }
 
@@ -303,7 +296,7 @@ class SPIShift(parameter: SPIParameter) extends Module {
   *   - 6: SS
   *
   * CTRL register layout:
-  *   - [charLenBits-1:0]  CHAR_LEN   character length (0 = maxChar)
+  *   - [charLenBits-1:0]  CHAR_LEN   character length (0 = no transfer)
   *   - [7]                reserved
   *   - [8]                GO         start transfer (auto-clears)
   *   - [9]                RX_NEGEDGE sample MISO on falling edge
