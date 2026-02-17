@@ -81,7 +81,10 @@
                   clang-tools
                   gtkwave
                   bear
+                  ccache
                 ];
+                env.VERILATOR_CCACHE = "1";
+                env.OBJCACHE = "${ccache}/bin/ccache";
                 RUST_SRC_PATH = "${rust.packages.stable.rustPlatform.rustLibSrc}";
               }
               // spi.spi-compiled.env
