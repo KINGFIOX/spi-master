@@ -4,9 +4,9 @@ import chisel3._
 import chisel3.util._
 import chisel3.experimental.Analog
 
-/** APB slave interface bundle. */
+/** APB slave interface bundle (32-bit address for memory-mapped QSPI flash). */
 class APBSlaveIO extends Bundle {
-  val paddr   = Input(UInt(5.W))
+  val paddr   = Input(UInt(32.W))
   val psel    = Input(Bool())
   val penable = Input(Bool())
   val pwrite  = Input(Bool())

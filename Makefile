@@ -71,13 +71,23 @@ BR_VDIR      := $(BUILD_DIR)/verilator_bitrev
 BR_EXE       := $(BR_VDIR)/VSPIBitRevTop
 BR_VCD       := $(BUILD_DIR)/bitrev_spi.vcd
 
+# ─── Chisel QSPI+PSRAM 仿真文件 ──────────────────────
+QP_ELABORATE := $(BUILD_DIR)/qspi_psram_top
+QP_RTL       := $(BUILD_DIR)/qspi_psram_rtl
+QP_TB_CPP    := $(OC_SIM)/sim_qspi_psram.cpp
+QP_PSRAM_SV  := $(OC_SIM)/psram_cmd.sv
+QP_VDIR      := $(BUILD_DIR)/verilator_qspi_psram
+QP_EXE       := $(QP_VDIR)/VQSPIPSRAMTop
+QP_VCD       := $(BUILD_DIR)/qspi_psram.vcd
+
 # ─── 默认目标 ──────────────────────────────────────────
-.PHONY: all sim_master sim_cs sim_opencores sim_chisel sim_bitrev \
-        wave_master wave_cs wave_opencores wave_chisel wave_bitrev \
+.PHONY: all sim_master sim_cs sim_opencores sim_chisel sim_bitrev sim_qspi_psram \
+        wave_master wave_cs wave_opencores wave_chisel wave_bitrev wave_qspi_psram \
         elaborate_chisel rtl_chisel elaborate_qspi rtl_qspi \
+        elaborate_qspi_psram rtl_qspi_psram \
         elaborate_bitrev rtl_bitrev clean
 
-all: sim_master sim_cs sim_opencores sim_chisel sim_bitrev
+all: sim_master sim_cs sim_opencores sim_chisel sim_bitrev sim_qspi_psram
 
 # ═══════════════════════════════════════════════════════
 #  nandland SPI_Master 仿真 (Icarus Verilog)
@@ -253,6 +263,62 @@ sim_bitrev: $(BR_VCD)
 
 wave_bitrev: $(BR_VCD)
 	$(GTKWAVE) $(BR_VCD) &
+
+# ═══════════════════════════════════════════════════════
+#  Chisel QSPI Master + PSRAM Slave 仿真
+#  (Mill + firtool + Verilator + DPI-C)
+# ═══════════════════════════════════════════════════════
+
+# Step 1: Elaborate → FIRRTL
+$(QP_ELABORATE)/QSPIPSRAMTop.fir: qspi/src/*.scala elaborator/src/QSPIPSRAMTop.scala configs/QSPIPSRAMTop.json | $(BUILD_DIR)
+	@mkdir -p $(QP_ELABORATE)
+	$(MILL) -i elaborator.runMain org.chipsalliance.spi.elaborator.QSPIPSRAMTopMain \
+		design --parameter configs/QSPIPSRAMTop.json --target-dir $(QP_ELABORATE)
+
+elaborate_qspi_psram: $(QP_ELABORATE)/QSPIPSRAMTop.fir
+
+# Step 2: FIRRTL → SystemVerilog
+$(QP_RTL)/QSPIPSRAMTop.sv: $(QP_ELABORATE)/QSPIPSRAMTop.fir
+	@mkdir -p $(QP_RTL)
+	$(FIRTOOL) $(QP_ELABORATE)/QSPIPSRAMTop.fir \
+		--annotation-file $(QP_ELABORATE)/QSPIPSRAMTop.anno.json \
+		-O=release --split-verilog \
+		--preserve-values=all \
+		--lowering-options=verifLabels,omitVersionComment \
+		--strip-debug-info \
+		--disable-all-randomization \
+		-o $(QP_RTL)
+
+rtl_qspi_psram: $(QP_RTL)/QSPIPSRAMTop.sv
+
+# Step 3: Verilator compile
+$(QP_EXE): $(QP_RTL)/QSPIPSRAMTop.sv $(QP_TB_CPP) $(QP_PSRAM_SV)
+	$(VERILATOR) --cc --exe --build --trace \
+		--top-module QSPIPSRAMTop \
+		--Mdir $(QP_VDIR) \
+		-Wno-WIDTH -Wno-CASEINCOMPLETE -Wno-UNUSEDSIGNAL \
+		-Wno-UNOPTFLAT -Wno-LATCH -Wno-MULTIDRIVEN \
+		-I$(QP_RTL) \
+		$(QP_RTL)/QSPIPSRAMTop.sv \
+		$(QP_RTL)/QSPI.sv \
+		$(QP_RTL)/QSPIClgen.sv \
+		$(QP_RTL)/QSPIShift.sv \
+		$(QP_RTL)/psram.sv \
+		$(QP_RTL)/Impl.sv \
+		$(QP_RTL)/TriStateInBuf.sv \
+		$(QP_PSRAM_SV) \
+		$(QP_TB_CPP) \
+		-o VQSPIPSRAMTop
+
+# Step 4: Run simulation
+$(QP_VCD): $(QP_EXE) | $(BUILD_DIR)
+	$(QP_EXE)
+
+sim_qspi_psram: $(QP_VCD)
+	@echo "✓ QSPI+PSRAM 仿真完成，波形文件: $(QP_VCD)"
+
+wave_qspi_psram: $(QP_VCD)
+	$(GTKWAVE) $(QP_VCD) &
 
 # ═══════════════════════════════════════════════════════
 #  辅助

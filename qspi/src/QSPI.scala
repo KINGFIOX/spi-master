@@ -12,7 +12,7 @@ import chisel3.properties.{AnyClassType, Class, Property}
 
 // ═══════════════════════════════════════════════════════════════════
 // Parameter
-// cofigs/QSPI.json, used for the parameter deserialize from json to case class
+// configs/QSPI.json, used for the parameter deserialize from json to case class
 // ═══════════════════════════════════════════════════════════════════
 
 object QSPIParameter {
@@ -83,9 +83,9 @@ class QSPIOM(parameter: QSPIParameter) extends Class {
 // ═══════════════════════════════════════════════════════════════════
 
 class QSPIIO extends Bundle {
-  val sck = Output(Bool())
+  val sck  = Output(Bool())
   val ce_n = Output(Bool())
-  val dio = Analog(4.W)
+  val dio  = Analog(4.W)
 }
 
 /** Interface of [[QSPI]]. */
@@ -93,7 +93,7 @@ class QSPIInterface(parameter: QSPIParameter) extends Bundle {
   val clock = Input(Clock())
   val reset = Input(if (parameter.useAsyncReset) AsyncReset() else Bool())
 
-  // APB slave
+  // APB slave (32-bit address for memory-mapped flash access)
   val apb  = new APBSlaveIO
   val intO = Output(Bool())
 
@@ -109,12 +109,6 @@ class QSPIInterface(parameter: QSPIParameter) extends Bundle {
 // Clock Generator
 // ═══════════════════════════════════════════════════════════════════
 
-/** QSPI serial clock generator.
-  *
-  * Divides the system clock by `2*(divider+1)` to produce `clkOut`.
-  * Also generates single-cycle `posEdge` / `negEdge` strobes one
-  * system-clock cycle before the corresponding edge of `clkOut`.
-  */
 class QSPIClgen(dividerLen: Int) extends Module {
   val io = IO(new Bundle {
     val go      = Input(Bool())
@@ -126,29 +120,25 @@ class QSPIClgen(dividerLen: Int) extends Module {
     val negEdge = Output(Bool())
   })
 
-  // Counter (reset to all-1s so the first period after reset is the longest)
-  private val cnt    = RegInit(((1L << dividerLen) - 1).U(dividerLen.W))
+  private val cnt    = RegInit(0.U(dividerLen.W))
   private val clkOut = RegInit(false.B)
 
   private val cntZero = cnt === 0.U
   private val cntOne  = cnt === 1.U
   private val divZero = !io.divider.orR
 
-  // Counter counts half period
   when(!io.tip || cntZero) {
     cnt := io.divider
   }.otherwise {
     cnt := cnt - 1.U
   }
 
-  // clk_out toggles every other half period
-  // ( !io.lastCLK || clkOut ) <=> ( io.lastClk -> clkOut )
-  // 如果是最后一次, 那么只有当 clkOut = 1 时, 才翻转, 这意味着最后一次永远是 1->0
+  // clkOut toggles every half period;
+  // lastClk → clkOut ensures the final edge is always 1→0
   when(io.tip && cntZero && (!io.lastClk || clkOut)) {
     clkOut := ~clkOut
   }
 
-  // Positive-edge / negative-edge strobes (registered)
   io.posEdge := RegNext(
     (io.tip && !clkOut && cntOne) ||
       (divZero && clkOut) ||
@@ -166,114 +156,112 @@ class QSPIClgen(dividerLen: Int) extends Module {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Shift Register  (corresponds to qspi_shift.v)
+// Shift Register
 // ═══════════════════════════════════════════════════════════════════
 
-/** QSPI shift register.
-  *
-  * Handles parallel load from the bus (byte-lane writes), serial
-  * output (MOSI), and serial input (MISO) with configurable MSB/LSB
-  * first ordering and configurable TX/RX clock edges.
-  */
 class QSPIShift(parameter: QSPIParameter) extends Module {
-  private val cBits = parameter.charLenBits
-  private val mChar = parameter.maxChar
+  private val cBits    = parameter.charLenBits // 7
+  private val mChar    = parameter.maxChar // 128
+  private val nNibbles = mChar >> 2 // 32 (number of 4bit)
+  private val idxBits  = log2Ceil(nNibbles) // 5
 
   val io = IO(new Bundle {
-    val len4       = Input(UInt(cBits.W)) // charLen (0 = no transfer)
-    val go        = Input(Bool())
-    val posEdge   = Input(Bool())
-    val negEdge   = Input(Bool())
-    val tip       = Output(Bool())  // transfer in progress
-    val last      = Output(Bool())  // last bit
-    val wen       = Input(Bool()) // write the data reg inside ?
-    val pIn       = Input(UInt(mChar.W)) // parallel input
-    val pOut      = Output(UInt(mChar.W)) // parallel output
-    val sClk      = Input(Bool()) // serial clock
-    val sIn       = Input(UInt(4.W)) // serial input
-    val sOut      = Output(UInt(4.W)) // serial output
-    val sOutEn    = Output(Bool())
+    val len4    = Input(UInt(cBits.W))  // total nibbles to transfer
+    val sOutLen = Input(UInt(cBits.W))  // nibbles with output enabled
+    val go      = Input(Bool())
+    val posEdge = Input(Bool())
+    val negEdge = Input(Bool())
+    val tip     = Output(Bool())        // transfer in progress
+    val last    = Output(Bool())        // last nibble (cnt == 0)
+    val wen     = Input(Bool())         // parallel load enable
+    val pIn     = Input(UInt(mChar.W))  // parallel input
+    val pOut    = Output(UInt(mChar.W)) // parallel output
+    val sClk    = Input(Bool())         // serial clock (unused, reserved)
+    val sIn     = Input(UInt(4.W))      // serial input  (DIO read)
+    val sOut    = Output(UInt(4.W))     // serial output (DIO write)
+    val sOutEn  = Output(Bool())        // output enable for DIO
   })
 
-  // ─── State ──────────────────────────────────────────────────
-  private val cnt  = RegInit(0.U(cBits.W)) // bit counter
-  private val data = RegInit(VecInit(Seq.fill(mChar >> 2)( 0.U(4.W) ))) // shift register
-  private val sOut = RegInit(false.B)
-  private val tip  = RegInit(false.B)
+  // ─── Registers ────────────────────────────────────────────────
+  private val data    = RegInit(VecInit(Seq.fill(nNibbles)(0.U(4.W))))
+  private val sOut    = RegInit(0.U(4.W))
+  private val cnt     = RegInit(0.U(cBits.W))
+  private val regLen4 = RegInit(0.U(cBits.W))
+  private val outCnt  = RegInit(0.U(cBits.W))
 
-  // ─── Combinational ─────────────────────────────────────────
-  private val last = !cnt.orR // cnt == 0
+  // ─── FSM ──────────────────────────────────────────────────────
+  private object State extends ChiselEnum {
+    val idle, mosi, miso = Value
+  }
+  private val state = RegInit(State.idle)
 
-  // Bit positions for TX and RX
-  private val txBitPos = cnt - 1.U
-  private val rxBitPos = cnt - 1.U
-
-  private val rxClk = io.posEdge && !last
+  // ─── Combinational ───────────────────────────────────────────
+  private val last   = !cnt.orR
+  private val bitPos = (cnt - 1.U)(idxBits - 1, 0)
+  private val rxClk  = io.posEdge && !last
   dontTouch(rxClk)
-  private val txClk = io.negEdge && !last
+  private val txClk  = io.negEdge && !last
   dontTouch(txClk)
 
-  // ─── Bit counter ────────────────────────────────────────────
-  when(tip) {
-    when(io.posEdge) { cnt := cnt - 1.U }
-  }.otherwise {
-    cnt := io.len4
-  }
+  // ─── State machine ───────────────────────────────────────────
+  switch(state) {
+    is(State.idle) {
+      cnt := regLen4
 
-  // ─── Transfer in progress ──────────────────────────────────
-  when(io.go && !tip && io.len4.orR) {
-    tip := true.B
-  }.elsewhen(tip && last && io.posEdge) {
-    tip := false.B
-  }
+      when(io.wen) {
+        for (i <- 0 until nNibbles) {
+          data(i) := io.pIn(i * 4 + 3, i * 4)
+        }
+        regLen4 := io.len4
+        outCnt  := io.sOutLen
 
-  // ─── TX: send bits to line ─────────────────────────────────
-  when(txClk || !tip) {
-    sOut := data(txBitPos)
-  }
+        val pInNibbles = VecInit((0 until nNibbles).map(i => io.pIn(i * 4 + 3, i * 4)))
+        val firstTxIdx = (io.len4 - 1.U)(idxBits - 1, 0)
+        sOut := pInNibbles(firstTxIdx)
+      }
 
-  // ─── Data register: parallel load / serial receive ─────────
-  when(!tip && io.wen) {
-    data := io.pIn
-  }.otherwise {
-    // Serial receive: sample MISO at rxBitPos
-    when(rxClk) {
-      data(rxBitPos) := io.sIn
+      when(io.go && regLen4.orR) {
+        state := State.mosi
+      }
+    }
+
+    is(State.mosi) {
+      when(io.posEdge) { cnt := cnt - 1.U }
+      when(rxClk)      { data(bitPos) := io.sIn }
+      when(txClk) {
+        sOut := data(bitPos)
+        when(outCnt.orR) { outCnt := outCnt - 1.U }
+      }
+
+      when(last && io.posEdge) {
+        state := State.idle
+      }.elsewhen(!outCnt.orR) {
+        state := State.miso
+      }
+    }
+
+    is(State.miso) {
+      when(io.posEdge) { cnt := cnt - 1.U }
+      when(rxClk)      { data(bitPos) := io.sIn }
+
+      when(last && io.posEdge) {
+        state := State.idle
+      }
     }
   }
 
-  // ─── Outputs ────────────────────────────────────────────────
-  io.pOut := data.asUInt
-  io.tip  := tip
-  io.last := last
-  io.sOut := sOut
+  // ─── Outputs ──────────────────────────────────────────────────
+  io.pOut   := data.asUInt
+  io.tip    := state =/= State.idle
+  io.last   := last
+  io.sOut   := sOut
+  io.sOutEn := state === State.mosi
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// QSPI Top  (corresponds to qspi_top.v)
+// QSPI Top
 // ═══════════════════════════════════════════════════════════════════
 
-/** Hardware Implementation of QSPI Master with APB slave interface.
-  *
-  * Register map (byte address → word offset via `paddr[4:2]`):
-  *   - 0: TX_0 / RX_0  (bits  31:0   of shift register)
-  *   - 1: TX_1 / RX_1  (bits  63:32)
-  *   - 2: TX_2 / RX_2  (bits  95:64)
-  *   - 3: TX_3 / RX_3  (bits 127:96)
-  *   - 4: CTRL
-  *   - 5: DIVIDER
-  *   - 6: SS
-  *
-  * CTRL register layout:
-  *   - [charLenBits-1:0]  CHAR_LEN   character length (0 = no transfer)
-  *   - [7]                reserved
-  *   - [8]                GO         start transfer (auto-clears)
-  *   - [9]                RX_NEGEDGE sample MISO on falling edge
-  *   - [10]               TX_NEGEDGE drive  MOSI on falling edge
-  *   - [11]               LSB        send LSB first
-  *   - [12]               IE         interrupt enable
-  *   - [13]               ASS        automatic slave select
-  */
 @instantiable
 class QSPI(val parameter: QSPIParameter)
     extends FixedIORawModule(new QSPIInterface(parameter))
@@ -284,100 +272,182 @@ class QSPI(val parameter: QSPIParameter)
   // ─── meta ──────────────────────────────────────────────
   override protected def implicitClock: Clock = io.clock
   override protected def implicitReset: Reset = io.reset
-  private val P = parameter
-  private val mChar = P.maxChar // 128
-  private val cBits = P.charLenBits // 7
-  private val qspiWriteCmd = "h38".U(8.W)
-  private val qspiReadCmd = "heb".U(8.W)
-  assert( io.apb.paddr(1, 0) === 0.U, "Error: QSPI read/write address must be aligned to 4 bytes." )
+  private val P     = parameter
+  private val mChar = P.maxChar
+  private val cBits = P.charLenBits
 
-  // ─── TriState Gate ──────────────────────────────────────────────
+  // ─── Expand 8-bit SPI command to 32-bit nibble format ─────
+  // Each command bit becomes a 4-bit nibble with the bit at [0].
+  // e.g. 0x38 (00111000) → 0x00111000 (8 nibbles: 0,0,1,1,1,0,0,0)
+  private def expandCmd(cmd: Int): BigInt = {
+    var result: BigInt = 0
+    for (i <- 7 to 0 by -1) {
+      result = (result << 4) | ((cmd >> i) & 1)
+    }
+    result
+  }
+  private val qspiWriteCmdExp = expandCmd(0x38).U(32.W) // write: quad input
+  private val qspiReadCmdExp  = expandCmd(0xEB).U(32.W) // read:  fast read quad I/O
+
+  assert(io.apb.paddr(1, 0) === 0.U, "Error: QSPI read/write address must be aligned to 4 bytes.")
+
+  // ─── TriState Gate ──────────────────────────────────────────
   private val mosiEnOut = WireDefault(false.B)
-  private val mosiOut = WireDefault( 0.U(4.W) )
-  private val miso = TriStateInBuf( io.qspiio.dio, mosiOut, mosiEnOut )
+  private val mosiOut   = WireDefault(0.U(4.W))
+  private val miso      = TriStateInBuf(io.qspiio.dio, mosiOut, mosiEnOut)
 
-  // ─── configs ──────────────────────────────────────────────
-  private val divider = RegInit(((1L << P.dividerLen) - 1).U(P.dividerLen.W)) // default 0xff
+  // ─── Config registers ──────────────────────────────────────
+  // Default divider = 0 → SCK = system_clock / 2 (fastest)
+  private val divider = RegInit(4.U(P.dividerLen.W))
 
-  // ─── register ────────────────────────────────────────────
-  private val qpi = RegInit(false.B)
-
-  // ─── Sub-modules, instantiate ─────────────────────────────
+  // ─── Sub-modules ───────────────────────────────────────────
   private val clgen = Module(new QSPIClgen(P.dividerLen))
   private val shift = Module(new QSPIShift(P))
 
-  // ─── Sub-modules, connections ─────────────────────────────
-  shift.io.len4 := 0.U
-  shift.io.go := false.B
+  // ─── Sub-modules: default connections ──────────────────────
+  shift.io.len4    := 0.U
+  shift.io.sOutLen := 0.U
+  shift.io.go      := false.B
   shift.io.posEdge := clgen.io.posEdge
   shift.io.negEdge := clgen.io.negEdge
-  shift.io.wen := false.B // default
-  shift.io.pIn := 0.U
-  shift.io.sClk := clgen.io.clkOut
-  shift.io.sIn := miso
-  mosiOut := shift.io.sOut
-  mosiEnOut := shift.io.sOutEn
-  clgen.io.go := false.B
-  clgen.io.tip := shift.io.tip
+  shift.io.wen     := false.B
+  shift.io.pIn     := 0.U
+  shift.io.sClk    := clgen.io.clkOut
+  shift.io.sIn     := miso
+  mosiOut          := shift.io.sOut
+  mosiEnOut        := shift.io.sOutEn
+
+  clgen.io.go      := false.B
+  clgen.io.tip     := shift.io.tip
   clgen.io.divider := divider
   clgen.io.lastClk := shift.io.last
 
-  // --- write calculation ------------------------------------------------------------
-  private val wdata = WireDefault( 0.U( mChar.W ) )
-  private val wCharLen4 = WireDefault( 0.U( cBits.W ) )
-  switch (io.apb.pstrb) {
-    is( "b0001".U ) { wdata := Cat( qspiWriteCmd, io.apb.paddr(23, 0), io.apb.pwdata(7, 0) ); wCharLen4 := ( (32 + 24 + 8) >> 2 ).U }
-    is( "b0010".U ) { wdata := Cat( qspiWriteCmd, io.apb.paddr(23, 0) + 1.U, io.apb.pwdata(15, 8) ); wCharLen4 := ( (32 + 24 + 8) >> 2 ).U }
-    is( "b0100".U ) { wdata := Cat( qspiWriteCmd, io.apb.paddr(23, 0) + 2.U, io.apb.pwdata(23, 16) ); wCharLen4 := ( (32 + 24 + 8) >> 2 ).U }
-    is( "b1000".U ) { wdata := Cat( qspiWriteCmd, io.apb.paddr(23, 0) + 3.U, io.apb.pwdata(31, 24) ); wCharLen4 := ( (32 + 24 + 8) >> 2 ).U }
-    is( "b0011".U ) { wdata := Cat( qspiWriteCmd, io.apb.paddr(23, 0), io.apb.pwdata(15, 0) ); wCharLen4 := ( (32 + 24 + 16) >> 2 ).U }
-    is( "b1100".U ) { wdata := Cat( qspiWriteCmd, io.apb.paddr(23, 0) + 2.U, io.apb.pwdata(31, 16) ); wCharLen4 := ( (32 + 24 + 16) >> 2 ).U }
-    is( "b1111".U ) { wdata := Cat( qspiWriteCmd, io.apb.paddr(23, 0), io.apb.pwdata(31, 0) ); wCharLen4 := ( (32 + 24 + 32) >> 2 ).U }
+  // ─── APB default outputs ──────────────────────────────────
+  io.apb.pready  := false.B
+  io.apb.prdata  := 0.U
+  io.apb.pslverr := false.B
+  io.intO        := false.B
+
+  // ─── QSPI outputs ────────────────────────────────────────
+  io.qspiio.sck := clgen.io.clkOut
+
+  // ─── Read/write tracking ──────────────────────────────────
+  private val isWriteReg = RegInit(false.B)
+
+  // ─── Write data calculation (little-endian byte swap) ─────
+  // For multi-byte writes, bytes are reordered so that
+  // the lowest APB byte lane maps to the lowest flash address.
+  private val wdata     = WireDefault(0.U(mChar.W))
+  private val wCharLen4 = WireDefault(0.U(cBits.W))
+
+  switch(io.apb.pstrb) {
+    is("b0001".U) {
+      wdata     := Cat(qspiWriteCmdExp, io.apb.paddr(23, 0), io.apb.pwdata(7, 0))
+      wCharLen4 := ((32 + 24 + 8) >> 2).U
+    }
+    is("b0010".U) {
+      wdata     := Cat(qspiWriteCmdExp, io.apb.paddr(23, 0) + 1.U, io.apb.pwdata(15, 8))
+      wCharLen4 := ((32 + 24 + 8) >> 2).U
+    }
+    is("b0100".U) {
+      wdata     := Cat(qspiWriteCmdExp, io.apb.paddr(23, 0) + 2.U, io.apb.pwdata(23, 16))
+      wCharLen4 := ((32 + 24 + 8) >> 2).U
+    }
+    is("b1000".U) {
+      wdata     := Cat(qspiWriteCmdExp, io.apb.paddr(23, 0) + 3.U, io.apb.pwdata(31, 24))
+      wCharLen4 := ((32 + 24 + 8) >> 2).U
+    }
+    is("b0011".U) {
+      val swapped = Cat(io.apb.pwdata(7, 0), io.apb.pwdata(15, 8))
+      wdata     := Cat(qspiWriteCmdExp, io.apb.paddr(23, 0), swapped)
+      wCharLen4 := ((32 + 24 + 16) >> 2).U
+    }
+    is("b1100".U) {
+      val swapped = Cat(io.apb.pwdata(23, 16), io.apb.pwdata(31, 24))
+      wdata     := Cat(qspiWriteCmdExp, io.apb.paddr(23, 0) + 2.U, swapped)
+      wCharLen4 := ((32 + 24 + 16) >> 2).U
+    }
+    is("b1111".U) {
+      val swapped = Cat(io.apb.pwdata(7, 0), io.apb.pwdata(15, 8), io.apb.pwdata(23, 16), io.apb.pwdata(31, 24))
+      wdata     := Cat(qspiWriteCmdExp, io.apb.paddr(23, 0), swapped)
+      wCharLen4 := ((32 + 24 + 32) >> 2).U
+    }
   }
 
-  // ─── state machine ──────────────────────────────────────────────
+  // ─── Transfer-complete detection ─────────────────────────
+  // Fires at the LAST cycle where tip is still true (same cycle
+  // as shift FSM's last && posEdge transition), so QSPI top and
+  // shift FSM transition in lockstep — no retrigger gap.
+  private val tipDone = shift.io.tip && shift.io.last && clgen.io.posEdge
+
+  // ─── State machine ────────────────────────────────────────
   object State extends ChiselEnum {
     val idle, setup, access, ready = Value
   }
   private val state = RegInit(State.idle)
-  private val pready_reg = RegInit(false.B)
+
   switch(state) {
     is(State.idle) {
-      pready_reg := false.B
       when(io.apb.psel && !io.apb.penable) {
         state := State.setup
       }
     }
+
     is(State.setup) {
-      assert(!qpi, "Error: QPI access detected but not supported.")
-      val next_charLen4 = WireDefault( 0.U(cBits.W) )
-      val next_data = WireDefault( 0.U(mChar.W) )
+      isWriteReg := io.apb.pwrite
+
+      val nextCharLen4 = WireDefault(0.U(cBits.W))
+      val nextData     = WireDefault(0.U(mChar.W))
+      val nextSOutLen4  = WireDefault(0.U(cBits.W))
+
+      // mux
       when(io.apb.pwrite) {
-        next_charLen4 := wCharLen4
-        next_data := wdata
-      } .otherwise {
-        next_charLen4 := ( (32 + 24 + 24 + 32) >> 2 ).U // read
-        next_data := Cat( qspiReadCmd, io.apb.paddr(23, 0), 0.U(24.W), 0.U(32.W) )
+        nextCharLen4 := wCharLen4
+        nextData     := wdata
+        nextSOutLen4  := wCharLen4
+      }.otherwise {
+        // Read: cmd(32) + addr(24) + wait(24) + rxdata(32) = 112 bits = 28 nibbles
+        nextCharLen4 := ((32 + 24 + 24 + 32) >> 2).U
+        nextData     := Cat(qspiReadCmdExp, io.apb.paddr(23, 0), 0.U(24.W), 0.U(32.W))
+        nextSOutLen4  := ((32 + 24) >> 2).U
       }
-      shift.io.wen := true.B
-      shift.io.len4 := next_charLen4
-      shift.io.pIn := next_data
-      state := State.access
+
+      when(nextCharLen4 === 0.U) {
+        // Unsupported pstrb or zero-length → skip transfer
+        state := State.ready
+      }.otherwise {
+        shift.io.wen     := true.B
+        shift.io.len4    := nextCharLen4
+        shift.io.pIn     := nextData
+        shift.io.sOutLen := nextSOutLen4
+        state            := State.access
+      }
     }
+
     is(State.access) {
-      clgen.io.go := true.B
       shift.io.go := true.B
-      when(shift.io.last) {
+      clgen.io.go := true.B
+      when(tipDone) {
         state := State.ready
       }
     }
+
     is(State.ready) {
       io.apb.pready := true.B
+
+      // For reads: reassemble the 32bit word from the 4 nibbles
+      when(!isWriteReg) {
+        val rd = shift.io.pOut(31, 0)
+        io.apb.prdata := Cat(rd(7, 0), rd(15, 8), rd(23, 16), rd(31, 24))
+      }
+
       when(io.apb.penable) {
         state := State.idle
       }
     }
   }
+
+  io.qspiio.ce_n := ! ( state === State.access )
 
   // ─── Probe ──────────────────────────────────────────────────
   private val probeWire: QSPIProbe = Wire(new QSPIProbe(parameter))

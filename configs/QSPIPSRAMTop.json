@@ -1,0 +1,6 @@
+{
+    "dividerLen": 16,
+    "maxChar": 128,
+    "ssNb": 8,
+    "useAsyncReset": false
+}
