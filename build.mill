@@ -30,6 +30,16 @@ trait SPIMaster extends common.HasChisel with ScalafmtModule {
   def chiselIvy       = Some(deps.chisel)
 }
 
+object qspi extends QSPIMaster
+trait QSPIMaster extends common.HasChisel with ScalafmtModule {
+  def scalaVersion = Task(deps.scalaVer)
+
+  def chiselModule    = None
+  def chiselPluginJar = Task(None)
+  def chiselPluginIvy = Some(deps.chiselPlugin)
+  def chiselIvy       = Some(deps.chisel)
+}
+
 object elaborator extends Elaborator
 trait Elaborator  extends common.ElaboratorModule with ScalafmtModule {
   def scalaVersion = Task(deps.scalaVer)
@@ -37,7 +47,7 @@ trait Elaborator  extends common.ElaboratorModule with ScalafmtModule {
   def mlirInstallPath  = Task.Input(os.Path(Task.env.getOrElse("MLIR_INSTALL_PATH", "MLIR_INSTALL_PATH not found")))
   def circtInstallPath = Task.Input(os.Path(Task.env.getOrElse("CIRCT_INSTALL_PATH", "CIRCT_INSTALL_PATH not found")))
 
-  def generators = Seq(spi)
+  def generators = Seq(spi, qspi)
 
   def mainargsIvy = deps.mainargs
 

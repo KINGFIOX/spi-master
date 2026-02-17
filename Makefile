@@ -59,6 +59,10 @@ CH_VDIR      := $(BUILD_DIR)/verilator_chisel
 CH_EXE       := $(CH_VDIR)/VSPI
 CH_VCD       := $(BUILD_DIR)/chisel_spi.vcd
 
+# ─── Chisel QSPI 文件 ─────────────────────────────────
+QS_ELABORATE := $(BUILD_DIR)/chisel_qspi
+QS_RTL       := $(BUILD_DIR)/chisel_qspi_rtl
+
 # ─── BitRev Slave 测试文件 (Chisel harness) ───────────
 BT_ELABORATE := $(BUILD_DIR)/bitrev_top
 BT_RTL       := $(BUILD_DIR)/bitrev_rtl
@@ -70,7 +74,8 @@ BR_VCD       := $(BUILD_DIR)/bitrev_spi.vcd
 # ─── 默认目标 ──────────────────────────────────────────
 .PHONY: all sim_master sim_cs sim_opencores sim_chisel sim_bitrev \
         wave_master wave_cs wave_opencores wave_chisel wave_bitrev \
-        elaborate_chisel rtl_chisel elaborate_bitrev rtl_bitrev clean
+        elaborate_chisel rtl_chisel elaborate_qspi rtl_qspi \
+        elaborate_bitrev rtl_bitrev clean
 
 all: sim_master sim_cs sim_opencores sim_chisel sim_bitrev
 
@@ -174,6 +179,33 @@ sim_chisel: $(CH_VCD)
 
 wave_chisel: $(CH_VCD)
 	$(GTKWAVE) $(CH_VCD) &
+
+# ═══════════════════════════════════════════════════════
+#  Chisel QSPI Master (Mill + firtool)
+#  暂时只生成 RTL，后续添加仿真
+# ═══════════════════════════════════════════════════════
+
+# Step 1: Elaborate Chisel → FIRRTL
+$(QS_ELABORATE)/QSPI.fir: qspi/src/QSPI.scala elaborator/src/QSPI.scala configs/QSPI.json | $(BUILD_DIR)
+	@mkdir -p $(QS_ELABORATE)
+	$(MILL) -i elaborator.runMain org.chipsalliance.spi.elaborator.QSPIMain \
+		design --parameter configs/QSPI.json --target-dir $(QS_ELABORATE)
+
+elaborate_qspi: $(QS_ELABORATE)/QSPI.fir
+
+# Step 2: FIRRTL → SystemVerilog
+$(QS_RTL)/QSPI.sv: $(QS_ELABORATE)/QSPI.fir
+	@mkdir -p $(QS_RTL)
+	$(FIRTOOL) $(QS_ELABORATE)/QSPI.fir \
+		--annotation-file $(QS_ELABORATE)/QSPI.anno.json \
+		-O=release --split-verilog \
+		--preserve-values=all \
+		--lowering-options=verifLabels,omitVersionComment \
+		--strip-debug-info \
+		--disable-all-randomization \
+		-o $(QS_RTL)
+
+rtl_qspi: $(QS_RTL)/QSPI.sv
 
 # ═══════════════════════════════════════════════════════
 #  Chisel SPI + BitRev Slave 仿真 (Chisel harness)

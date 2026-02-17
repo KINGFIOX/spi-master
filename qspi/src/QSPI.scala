@@ -171,7 +171,7 @@ class QSPIClgen(dividerLen: Int) extends Module {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Shift Register  (corresponds to spi_shift.v)
+// Shift Register  (corresponds to qspi_shift.v)
 // ═══════════════════════════════════════════════════════════════════
 
 /** QSPI shift register.
@@ -239,7 +239,7 @@ class QSPIShift(parameter: QSPIParameter) extends Module {
 
   // ─── Data register: parallel load / serial receive ─────────
   // qspi-master 对 cpu 暴露了几种 MMIO 的寄存器
-  // CTRL 放到了 QSPI(Top) 中, 而 data 放到了 SPIShift 中, Rxx/Txx 是 data 的两种访问方式
+  // CTRL 放到了 QSPI(Top) 中, 而 data 放到了 QSPIShift 中, Rxx/Txx 是 data 的两种访问方式
   // io.latch 是 word mask, 因为 apb 一次只能传输 32bit, 所以 io.latch 是 one-hot 的
   // io.byteSel 是 byte mask
   when(!tip && io.latch.orR) {
