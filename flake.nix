@@ -82,6 +82,7 @@
                   gtkwave
                   bear
                   ccache
+                  metals
                 ];
                 env.VERILATOR_CCACHE = "1";
                 env.OBJCACHE = "${ccache}/bin/ccache";
