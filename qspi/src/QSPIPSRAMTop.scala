@@ -57,6 +57,7 @@ class QSPIPSRAMTop(val parameter: QSPIParameter)
   psramDev.io.sck  := qspiMaster.io.qspiio.sck
   psramDev.io.ce_n := qspiMaster.io.qspiio.ce_n
   psramDev.io.dio  <> qspiMaster.io.qspiio.dio
+  psramDev.systemReset := io.reset.asAsyncReset
 
   // Debug outputs
   io.qspi_sck  := qspiMaster.io.qspiio.sck

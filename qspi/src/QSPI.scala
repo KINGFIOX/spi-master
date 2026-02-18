@@ -286,8 +286,10 @@ class QSPI(val parameter: QSPIParameter)
     }
     result
   }
-  private val qspiWriteCmdExp = expandCmd(0x38).U(32.W) // write: quad input
-  private val qspiReadCmdExp  = expandCmd(0xEB).U(32.W) // read:  fast read quad I/O
+  // private val qspiWriteCmdExp = expandCmd(0x38).U(32.W) // write: quad input
+  private val qspiWriteCmdExp = (0x38).U(8.W) // write: quad input
+  // private val qspiReadCmdExp  = expandCmd(0xEB).U(32.W) // read:  fast read quad I/O
+  private val qspiReadCmdExp  = (0xEB).U(8.W) // read:  fast read quad I/O
 
   assert(io.apb.paddr(1, 0) === 0.U, "Error: QSPI read/write address must be aligned to 4 bytes.")
 
@@ -343,34 +345,34 @@ class QSPI(val parameter: QSPIParameter)
   switch(io.apb.pstrb) {
     is("b0001".U) {
       wdata     := Cat(qspiWriteCmdExp, io.apb.paddr(23, 0), io.apb.pwdata(7, 0))
-      wCharLen4 := ((32 + 24 + 8) >> 2).U
+      wCharLen4 := ((8 + 24 + 8) >> 2).U
     }
     is("b0010".U) {
       wdata     := Cat(qspiWriteCmdExp, io.apb.paddr(23, 0) + 1.U, io.apb.pwdata(15, 8))
-      wCharLen4 := ((32 + 24 + 8) >> 2).U
+      wCharLen4 := ((8 + 24 + 8) >> 2).U
     }
     is("b0100".U) {
       wdata     := Cat(qspiWriteCmdExp, io.apb.paddr(23, 0) + 2.U, io.apb.pwdata(23, 16))
-      wCharLen4 := ((32 + 24 + 8) >> 2).U
+      wCharLen4 := ((8 + 24 + 8) >> 2).U
     }
     is("b1000".U) {
       wdata     := Cat(qspiWriteCmdExp, io.apb.paddr(23, 0) + 3.U, io.apb.pwdata(31, 24))
-      wCharLen4 := ((32 + 24 + 8) >> 2).U
+      wCharLen4 := ((8 + 24 + 8) >> 2).U
     }
     is("b0011".U) {
       val swapped = Cat(io.apb.pwdata(7, 0), io.apb.pwdata(15, 8))
       wdata     := Cat(qspiWriteCmdExp, io.apb.paddr(23, 0), swapped)
-      wCharLen4 := ((32 + 24 + 16) >> 2).U
+      wCharLen4 := ((8 + 24 + 16) >> 2).U
     }
     is("b1100".U) {
       val swapped = Cat(io.apb.pwdata(23, 16), io.apb.pwdata(31, 24))
       wdata     := Cat(qspiWriteCmdExp, io.apb.paddr(23, 0) + 2.U, swapped)
-      wCharLen4 := ((32 + 24 + 16) >> 2).U
+      wCharLen4 := ((8 + 24 + 16) >> 2).U
     }
     is("b1111".U) {
       val swapped = Cat(io.apb.pwdata(7, 0), io.apb.pwdata(15, 8), io.apb.pwdata(23, 16), io.apb.pwdata(31, 24))
       wdata     := Cat(qspiWriteCmdExp, io.apb.paddr(23, 0), swapped)
-      wCharLen4 := ((32 + 24 + 32) >> 2).U
+      wCharLen4 := ((8 + 24 + 32) >> 2).U
     }
   }
 
@@ -407,9 +409,9 @@ class QSPI(val parameter: QSPIParameter)
         nextSOutLen4  := wCharLen4
       }.otherwise {
         // Read: cmd(32) + addr(24) + wait(24) + rxdata(32) = 112 bits = 28 nibbles
-        nextCharLen4 := ((32 + 24 + 24 + 32) >> 2).U
+        nextCharLen4 := ((8 + 24 + 24 + 32) >> 2).U
         nextData     := Cat(qspiReadCmdExp, io.apb.paddr(23, 0), 0.U(24.W), 0.U(32.W))
-        nextSOutLen4  := ((32 + 24) >> 2).U
+        nextSOutLen4  := ((8 + 24) >> 2).U
       }
 
       when(nextCharLen4 === 0.U) {
