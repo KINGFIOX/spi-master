@@ -1,3 +1,4 @@
+
 package org.chipsalliance.qspi
 
 import chisel3._
@@ -36,7 +37,7 @@ class psram extends RawModule {
     })
 
     // mode
-    val qpiMode = withClockAndReset( this.clock, io.systemReset ) { RegInit(true.B) }
+    val qpiMode = withClockAndReset( this.clock, io.systemReset ) { RegInit(false.B) }
 
     object State extends ChiselEnum {
       val cmd, addr, wait_read, data = Value
@@ -64,13 +65,9 @@ class psram extends RawModule {
         when( qpiMode ) { // qpi mode
           val next_cmd = Cat( cmd(3,0), io.mosi )
           cmd := next_cmd
-          when(counter === 1.U) {
+          when(counter === 1.U) { // only allow: qspi -> qpi; not allow: qpi -> qspi
             counter := 0.U
             state := State.addr
-            when(next_cmd === "hf5".U) {
-              qpiMode := false.B
-              state := State.cmd
-            }
           }
         } .otherwise { // qspi mode
           val next_cmd = Cat( cmd(6, 0), io.mosi(0) )

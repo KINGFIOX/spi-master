@@ -332,9 +332,10 @@ class QSPI(val parameter: QSPIParameter)
 
   // ─── QSPI outputs ────────────────────────────────────────
   io.qspiio.sck := clgen.io.clkOut
+  io.qspiio.ce_n := true.B
 
-  // ─── Read/write tracking ──────────────────────────────────
-  private val isWriteReg = RegInit(false.B)
+  // ─── QPI Mode ────────────────────────────────────────
+  private val qpiMode = RegInit(false.B)
 
   // ─── Write data calculation (little-endian byte swap) ─────
   // For multi-byte writes, bytes are reordered so that
@@ -384,13 +385,29 @@ class QSPI(val parameter: QSPIParameter)
 
   // ─── State machine ────────────────────────────────────────
   object State extends ChiselEnum {
-    val idle, setup, access, ready = Value
+    val initSetup, initAccess, idle, setup, access, ready = Value
   }
-  private val state = RegInit(State.idle)
+  private val state = RegInit(State.initSetup)
+  private val isWriteReg = RegInit(false.B)
 
   switch(state) {
+    is(State.initSetup) {
+      shift.io.wen := true.B
+      shift.io.len4 := ( (32) >> 2 ).U
+      shift.io.pIn := expandCmd(0x35).U(32.W)
+      shift.io.sOutLen := ( (32) >> 2 ).U
+      state := State.initAccess
+    }
+    is(State.initAccess) {
+      io.qspiio.ce_n := false.B
+      shift.io.go := true.B
+      clgen.io.go := true.B
+      when(tipDone) {
+        state := State.idle
+      }
+    }
     is(State.idle) {
-      when(io.apb.psel && !io.apb.penable) {
+      when(io.apb.psel) {
         state := State.setup
       }
     }
@@ -427,6 +444,7 @@ class QSPI(val parameter: QSPIParameter)
     }
 
     is(State.access) {
+      io.qspiio.ce_n := false.B
       shift.io.go := true.B
       clgen.io.go := true.B
       when(tipDone) {
@@ -448,8 +466,6 @@ class QSPI(val parameter: QSPIParameter)
       }
     }
   }
-
-  io.qspiio.ce_n := ! ( state === State.access )
 
   // ─── Probe ──────────────────────────────────────────────────
   private val probeWire: QSPIProbe = Wire(new QSPIProbe(parameter))
