@@ -63,7 +63,6 @@
               enable = true;
               excludes = [ "*/generated.nix" ];
             };
-            programs.rustfmt.enable = true;
           };
 
           devShells.default =
@@ -72,8 +71,6 @@
               {
                 inputsFrom = [ spi.spi-compiled ];
                 packages = [
-                  cargo
-                  rust-analyzer
                   nixd
                   nvfetcher
                   verilator
@@ -86,7 +83,6 @@
                 ];
                 env.VERILATOR_CCACHE = "1";
                 env.OBJCACHE = "${ccache}/bin/ccache";
-                RUST_SRC_PATH = "${rust.packages.stable.rustPlatform.rustLibSrc}";
               }
               // spi.spi-compiled.env
             );
